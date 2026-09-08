@@ -1,5 +1,19 @@
 # TradingLab
 
+Sistema personal de preservación de capital y análisis de disciplina para XM/MT5.
+
+## Sincronización de MT5 (sólo lectura)
+
+1. Crea un proyecto Supabase y ejecuta `supabase/migrations/202609080001_mt5_sync.sql` en el SQL Editor.
+2. Configura en Vercel las cuatro variables listadas en `.env.example`. Genera los dos tokens con al menos 32 bytes aleatorios y usa valores diferentes.
+3. Despliega el proyecto y cambia `ApiUrl` en `mt5/TradingLabSync.mq5` por `https://TU-DOMINIO/api/mt5/snapshot`.
+4. Abre MetaEditor desde MT5, copia el EA, compílalo y añádelo a una gráfica.
+5. En MT5 abre **Tools → Options → Expert Advisors**, activa WebRequest y agrega únicamente el origen `https://TU-DOMINIO`.
+6. Coloca `MT5_INGEST_TOKEN` en los parámetros del EA. Nunca lo escribas dentro del archivo que subes a Git.
+7. En TradingLab → **Cuenta MT5**, introduce `TRADINGLAB_READ_TOKEN`.
+
+El EA no llama ninguna función de trading. Sólo consulta cuenta, posiciones, cierres y especificaciones de símbolos. Los archivos `.ex5` y secretos locales se excluyen de Git.
+
 Sistema web local-first para tomar decisiones de trading con límites verificables antes de exponer capital.
 
 ## MVP

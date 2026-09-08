@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Activity, AlertTriangle, BarChart3, BookOpen, Calculator, Check, ChevronRight, CircleDollarSign, FileUp, FlaskConical, LayoutDashboard, LockKeyhole, Menu, Shield, ShieldAlert, Target, TrendingDown, TrendingUp, X } from 'lucide-react'
+import { Activity, AlertTriangle, BarChart3, BookOpen, Calculator, Check, ChevronRight, CircleDollarSign, FileUp, FlaskConical, LayoutDashboard, LockKeyhole, Menu, Radio, Shield, ShieldAlert, Target, TrendingDown, TrendingUp, X } from 'lucide-react'
 import { calculateRisk } from './lib/risk'
 import { decodeXmReport, metricsFor, parseXmReport } from './lib/xmParser'
 import { simulateMonteCarlo } from './lib/monteCarlo'
 import type { JournalEntry, Side, Trade } from './types'
+import { LiveAccount } from './LiveAccount'
 
-type View = 'dashboard' | 'risk' | 'simulator' | 'journal'
+type View = 'dashboard' | 'live' | 'risk' | 'simulator' | 'journal'
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 const pct = (value: number) => `${value.toFixed(2)}%`
 
@@ -51,7 +52,7 @@ function App() {
   }
 
   const nav = [
-    ['dashboard', LayoutDashboard, 'Resumen'], ['risk', Calculator, 'Planificar operación'],
+    ['dashboard', LayoutDashboard, 'Resumen'], ['live', Radio, 'Cuenta MT5'], ['risk', Calculator, 'Planificar operación'],
     ['simulator', FlaskConical, 'Monte Carlo'], ['journal', BookOpen, 'Diario'],
   ] as const
 
@@ -65,6 +66,7 @@ function App() {
     <main>
       <header className="topbar"><button className="menu-button" onClick={() => setSidebar(!sidebar)}><Menu/></button><div><span className="eyebrow">CUENTA DE ENTRENAMIENTO</span><b>Protocolo de preservación activo</b></div><div className="risk-pill"><span></span> Riesgo base 0.25%</div></header>
       {view === 'dashboard' && <Dashboard trades={trades} metrics={metrics} onImport={() => fileRef.current?.click()} message={importMessage} />}
+      {view === 'live' && <LiveAccount />}
       {view === 'risk' && <RiskPlanner />}
       {view === 'simulator' && <MonteCarlo />}
       {view === 'journal' && <Journal entries={journal} setEntries={setJournal} />}
