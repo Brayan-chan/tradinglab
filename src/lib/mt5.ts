@@ -9,7 +9,11 @@ export interface LivePosition {
 export interface LiveSymbol {
   symbol:string; contract_size:number; tick_size:number; tick_value:number; volume_min:number; volume_step:number; bid:number; ask:number
 }
-export interface LiveState { ok:true; account:LiveAccount|null; positions:LivePosition[]; deals:unknown[]; symbols:LiveSymbol[] }
+export interface LiveDeal {
+  ticket:string; order_ticket:string; position_ticket:string; symbol:string; side:'buy'|'sell'
+  entry:'in'|'out'|'inout'; volume:number; price:number; profit:number; commission:number; swap:number; executed_at:string
+}
+export interface LiveState { ok:true; account:LiveAccount|null; positions:LivePosition[]; deals:LiveDeal[]; symbols:LiveSymbol[] }
 
 export async function fetchMt5State(token:string, signal?:AbortSignal):Promise<LiveState> {
   const response=await fetch('/api/mt5/state',{headers:{Authorization:`Bearer ${token}`},signal,cache:'no-store'})

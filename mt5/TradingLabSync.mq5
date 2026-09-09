@@ -53,13 +53,13 @@ string DealsJson() {
    for(int i=HistoryDealsTotal()-1;i>=0 && added<500;i--) {
       ulong ticket=HistoryDealGetTicket(i); if(ticket==0) continue;
       long entry=HistoryDealGetInteger(ticket,DEAL_ENTRY);
-      if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_INOUT) continue;
       long type=HistoryDealGetInteger(ticket,DEAL_TYPE);
       if(type!=DEAL_TYPE_BUY && type!=DEAL_TYPE_SELL) continue;
       string item="{\"ticket\":\""+(string)ticket+"\",\"orderTicket\":\""+(string)HistoryDealGetInteger(ticket,DEAL_ORDER)+"\","
          "\"positionTicket\":\""+(string)HistoryDealGetInteger(ticket,DEAL_POSITION_ID)+"\","
          "\"symbol\":\""+EscapeJson(HistoryDealGetString(ticket,DEAL_SYMBOL))+"\","
          "\"side\":\""+(type==DEAL_TYPE_BUY ? "buy" : "sell")+"\","
+         "\"entry\":\""+(entry==DEAL_ENTRY_IN ? "in" : entry==DEAL_ENTRY_OUT ? "out" : "inout")+"\","
          "\"volume\":"+Num(HistoryDealGetDouble(ticket,DEAL_VOLUME))+",\"price\":"+Num(HistoryDealGetDouble(ticket,DEAL_PRICE))+","
          "\"profit\":"+Num(HistoryDealGetDouble(ticket,DEAL_PROFIT),2)+",\"commission\":"+Num(HistoryDealGetDouble(ticket,DEAL_COMMISSION),2)+","
          "\"swap\":"+Num(HistoryDealGetDouble(ticket,DEAL_SWAP),2)+",\"time\":\""+IsoTime((datetime)HistoryDealGetInteger(ticket,DEAL_TIME))+"\"}";
