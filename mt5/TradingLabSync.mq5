@@ -3,7 +3,7 @@
 #property strict
 #property description "Read-only bridge: sends account snapshots to TradingLab. It never trades."
 
-input string ApiUrl = "https://YOUR-DEPLOYMENT.vercel.app/api/mt5/snapshot";
+input string ApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/snapshot";
 input string IngestToken = "PASTE_YOUR_INGEST_TOKEN";
 input int SyncEverySeconds = 10;
 input int HistoryDays = 7;

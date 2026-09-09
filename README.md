@@ -6,9 +6,9 @@ Sistema personal de preservación de capital y análisis de disciplina para XM/M
 
 1. Crea un proyecto Supabase y ejecuta `supabase/migrations/202609080001_mt5_sync.sql` en el SQL Editor.
 2. Configura en Vercel las cuatro variables listadas en `.env.example`. Genera los dos tokens con al menos 32 bytes aleatorios y usa valores diferentes.
-3. Despliega el proyecto y cambia `ApiUrl` en `mt5/TradingLabSync.mq5` por `https://TU-DOMINIO/api/mt5/snapshot`.
+3. El EA ya apunta al endpoint de producción `https://tradinglab-beryl.vercel.app/api/mt5/snapshot`.
 4. Abre MetaEditor desde MT5, copia el EA, compílalo y añádelo a una gráfica.
-5. En MT5 abre **Tools → Options → Expert Advisors**, activa WebRequest y agrega únicamente el origen `https://TU-DOMINIO`.
+5. En MT5 abre **Tools → Options → Expert Advisors**, activa WebRequest y agrega únicamente el origen `https://tradinglab-beryl.vercel.app`.
 6. Coloca `MT5_INGEST_TOKEN` en los parámetros del EA. Nunca lo escribas dentro del archivo que subes a Git.
 7. En TradingLab → **Cuenta MT5**, introduce `TRADINGLAB_READ_TOKEN`.
 
