@@ -39,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (payload.deals.length) {
     const { error } = await db.from('mt5_deals').upsert(payload.deals.map(d => ({
       account_key, ticket:d.ticket, order_ticket:d.orderTicket, position_ticket:d.positionTicket, symbol:d.symbol,
-      side:d.side, volume:d.volume, price:d.price, profit:d.profit, commission:d.commission, swap:d.swap, executed_at:d.time,
+      side:d.side, entry:d.entry, volume:d.volume, price:d.price, profit:d.profit, commission:d.commission, swap:d.swap, executed_at:d.time,
     })), { onConflict:'account_key,ticket', ignoreDuplicates:true })
     if (error) return res.status(500).json({ ok:false, error:'Deal sync failed' })
   }
