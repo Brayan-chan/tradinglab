@@ -10,6 +10,7 @@ const snapshot={
 
 describe('validSnapshot',()=>{
   it('accepts a bounded MT5 snapshot',()=>expect(validSnapshot(snapshot)).toBe(true))
+  it('accepts legacy closing deals while the EA is upgraded',()=>expect(validSnapshot({...snapshot,deals:[Object.fromEntries(Object.entries(snapshot.deals[0]).filter(([key])=>key!=='entry'))]})).toBe(true))
   it('rejects invalid directions',()=>expect(validSnapshot({...snapshot,positions:[{...snapshot.positions[0],side:'hold'}]})).toBe(false))
   it('rejects an invalid deal entry',()=>expect(validSnapshot({...snapshot,deals:[{...snapshot.deals[0],entry:'unknown'}]})).toBe(false))
   it('rejects unbounded arrays',()=>expect(validSnapshot({...snapshot,positions:Array(201).fill(snapshot.positions[0])})).toBe(false))
