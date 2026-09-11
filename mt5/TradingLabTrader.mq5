@@ -1,5 +1,5 @@
 #property copyright "TradingLab"
-#property version   "0.100"
+#property version   "1.000"
 #property strict
 #property description "BTCUSD guarded strategy. Shadow by default; demo execution requires two explicit switches."
 
