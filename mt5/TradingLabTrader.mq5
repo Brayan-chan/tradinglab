@@ -1,5 +1,5 @@
 #property copyright "TradingLab"
-#property version   "0.10"
+#property version   "0.100"
 #property strict
 #property description "BTCUSD guarded strategy. Shadow by default; demo execution requires two explicit switches."
 
@@ -65,7 +65,7 @@ double VolumeForRisk(double entry,double stop){
 }
 
 void Evaluate(){
-  MqlRates m5[8],m15[2];ArraySetAsSeries(m5,true);ArraySetAsSeries(m15,true);if(CopyRates(StrategySymbol,PERIOD_M5,0,8,m5)<8||CopyRates(StrategySymbol,PERIOD_M15,0,2,m15)<2)return;
+  MqlRates m5[],m15[];ArraySetAsSeries(m5,true);ArraySetAsSeries(m15,true);if(CopyRates(StrategySymbol,PERIOD_M5,0,8,m5)<8||CopyRates(StrategySymbol,PERIOD_M15,0,2,m15)<2)return;
   datetime closedBar=m5[1].time;if(closedBar==lastM5Bar)return;lastM5Bar=closedBar;
   double h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,m5Ema2;if(!ReadValue(h1FastHandle,1,h1Fast)||!ReadValue(h1SlowHandle,1,h1Slow)||!ReadValue(m15EmaHandle,1,m15Ema)||!ReadValue(m15AtrHandle,1,m15Atr)||!ReadValue(m5EmaHandle,1,m5Ema1)||!ReadValue(m5EmaHandle,2,m5Ema2)){SendDecision("error","","No se pudieron leer los indicadores",closedBar);return;}
   MqlTick tick;if(!SymbolInfoTick(StrategySymbol,tick)){SendDecision("error","","No se pudo leer el precio de BTCUSD",closedBar);return;}double point=SymbolInfoDouble(StrategySymbol,SYMBOL_POINT),spreadPoints=point>0?(tick.ask-tick.bid)/point:EMPTY_VALUE;
