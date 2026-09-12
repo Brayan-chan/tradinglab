@@ -8,6 +8,7 @@
 enum TradingLabMode { MODE_SHADOW=0, MODE_DEMO=1 };
 
 input string DecisionApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/decision";
+input string MarketApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/market";
 input string IngestToken = "PASTE_YOUR_INGEST_TOKEN";
 input TradingLabMode RunMode = MODE_SHADOW;
 input bool EnableDemoExecution = false;
@@ -29,6 +30,7 @@ input ulong MagicNumber = 260911;
 CTrade trade;
 int h1FastHandle=INVALID_HANDLE,h1SlowHandle=INVALID_HANDLE,m15EmaHandle=INVALID_HANDLE,m15AtrHandle=INVALID_HANDLE,m5EmaHandle=INVALID_HANDLE;
 datetime lastM5Bar=0;
+datetime lastMarketSync=0;
 
 string EscapeJson(string value){StringReplace(value,"\\","\\\\");StringReplace(value,"\"","\\\"");StringReplace(value,"\r","\\r");StringReplace(value,"\n","\\n");return value;}
 string NumOrNull(double value,int digits=8){if(value==EMPTY_VALUE||!MathIsValidNumber(value))return "null";return DoubleToString(value,digits);}
@@ -92,6 +94,17 @@ int OnInit(){
   if(h1FastHandle==INVALID_HANDLE||h1SlowHandle==INVALID_HANDLE||m15EmaHandle==INVALID_HANDLE||m15AtrHandle==INVALID_HANDLE||m5EmaHandle==INVALID_HANDLE)return INIT_FAILED;
   EventSetTimer(5);Comment("TradingLabTrader · ",RunMode==MODE_SHADOW?"SOMBRA":"DEMO"," · BTCUSD");return INIT_SUCCEEDED;
 }
-void OnTimer(){Evaluate();}
+void SendMarket(){
+  if(TimeGMT()-lastMarketSync<15)return;
+  lastMarketSync=TimeGMT();
+  MqlRates bars[];ArraySetAsSeries(bars,false);
+  int count=CopyRates(StrategySymbol,PERIOD_M5,0,240,bars);if(count<=0)return;
+  string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\",\"symbol\":\""+EscapeJson(StrategySymbol)+"\",\"capturedAt\":\""+IsoTime(TimeGMT())+"\",\"bars\":[";
+  for(int i=0;i<count;i++){if(i>0)body+=",";body+="{\"time\":"+(string)(long)BrokerTimeToGmt(bars[i].time)+",\"open\":"+NumOrNull(bars[i].open)+",\"high\":"+NumOrNull(bars[i].high)+",\"low\":"+NumOrNull(bars[i].low)+",\"close\":"+NumOrNull(bars[i].close)+"}";}
+  body+="]}";char data[],result[];string headers;int size=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);if(size>0)ArrayResize(data,size-1);
+  int status=WebRequest("POST",MarketApiUrl,"Content-Type: application/json\r\nAuthorization: Bearer "+IngestToken+"\r\n",5000,data,result,headers);
+  if(status!=200)Print("TradingLab market sync failed HTTP=",status," error=",GetLastError());
+}
+void OnTimer(){Evaluate();SendMarket();}
 void OnTick(){Evaluate();}
 void OnDeinit(const int reason){EventKillTimer();if(h1FastHandle!=INVALID_HANDLE)IndicatorRelease(h1FastHandle);if(h1SlowHandle!=INVALID_HANDLE)IndicatorRelease(h1SlowHandle);if(m15EmaHandle!=INVALID_HANDLE)IndicatorRelease(m15EmaHandle);if(m15AtrHandle!=INVALID_HANDLE)IndicatorRelease(m15AtrHandle);if(m5EmaHandle!=INVALID_HANDLE)IndicatorRelease(m5EmaHandle);Comment("");}
