@@ -28,6 +28,6 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
  const key=accountKey(v.server,v.login)
  const rows=v.bars.map((b:any)=>({account_key:key,symbol:v.symbol,time:b.time,open:b.open,high:b.high,low:b.low,close:b.close,captured_at:new Date(captured).toISOString()}))
  const result=await db.from('mt5_market_bars').upsert(rows,{onConflict:'account_key,symbol,time'})
- if(result.error)return res.status(500).json({ok:false,error:'Market persistence failed'})
+ if(result.error){console.error('Market persistence failed',{code:result.error.code??null,message:result.error.message});return res.status(500).json({ok:false,error:'Market persistence failed',code:result.error.code??'DATABASE_TRANSPORT_ERROR'})}
  return res.json({ok:true})
 }

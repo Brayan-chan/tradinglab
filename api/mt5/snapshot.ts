@@ -25,30 +25,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     balance: payload.balance, equity: payload.equity, margin: payload.margin, free_margin: payload.freeMargin,
     margin_level: payload.marginLevel, snapshot_at: now,
   }, { onConflict:'account_key' })
-  if (accountError) { console.error('Account sync failed',accountError.code);return res.status(500).json({ ok:false, error:'Account sync failed', code:accountError.code }) }
+  if (accountError) { console.error('Account sync failed',{code:accountError.code??null,message:accountError.message});return res.status(500).json({ ok:false, error:'Account sync failed', code:accountError.code??'DATABASE_TRANSPORT_ERROR' }) }
 
   const { error: clearError } = await db.from('mt5_positions').delete().eq('account_key', account_key)
-  if (clearError) { console.error('Position clear failed',clearError.code);return res.status(500).json({ ok:false, error:'Position sync failed', code:clearError.code }) }
+  if (clearError) { console.error('Position clear failed',{code:clearError.code??null,message:clearError.message});return res.status(500).json({ ok:false, error:'Position sync failed', code:clearError.code??'DATABASE_TRANSPORT_ERROR' }) }
   if (payload.positions.length) {
     const { error } = await db.from('mt5_positions').insert(payload.positions.map(p => ({
       account_key, ticket:p.ticket, symbol:p.symbol, side:p.side, volume:p.volume, price_open:p.priceOpen,
       price_current:p.priceCurrent, stop_loss:p.sl || null, take_profit:p.tp || null, profit:p.profit, swap:p.swap, observed_at:now,
     })))
-    if (error) { console.error('Position insert failed',error.code);return res.status(500).json({ ok:false, error:'Position sync failed', code:error.code }) }
+    if (error) { console.error('Position insert failed',{code:error.code??null,message:error.message});return res.status(500).json({ ok:false, error:'Position sync failed', code:error.code??'DATABASE_TRANSPORT_ERROR' }) }
   }
   if (payload.deals.length) {
     const { error } = await db.from('mt5_deals').upsert(payload.deals.map(d => ({
       account_key, ticket:d.ticket, order_ticket:d.orderTicket, position_ticket:d.positionTicket, symbol:d.symbol,
       side:d.side, entry:d.entry??'out', volume:d.volume, price:d.price, profit:d.profit, commission:d.commission, swap:d.swap, executed_at:d.time,
     })), { onConflict:'account_key,ticket', ignoreDuplicates:true })
-    if (error) { console.error('Deal sync failed',error.code);return res.status(500).json({ ok:false, error:'Deal sync failed', code:error.code }) }
+    if (error) { console.error('Deal sync failed',{code:error.code??null,message:error.message});return res.status(500).json({ ok:false, error:'Deal sync failed', code:error.code??'DATABASE_TRANSPORT_ERROR' }) }
   }
   if (payload.symbols.length) {
     const { error } = await db.from('mt5_symbols').upsert(payload.symbols.map(s => ({
       account_key, symbol:s.symbol, contract_size:s.contractSize, tick_size:s.tickSize, tick_value:s.tickValue,
       volume_min:s.volumeMin, volume_step:s.volumeStep, bid:s.bid, ask:s.ask, observed_at:now,
     })), { onConflict:'account_key,symbol' })
-    if (error) { console.error('Symbol sync failed',error.code);return res.status(500).json({ ok:false, error:'Symbol sync failed', code:error.code }) }
+    if (error) { console.error('Symbol sync failed',{code:error.code??null,message:error.message});return res.status(500).json({ ok:false, error:'Symbol sync failed', code:error.code??'DATABASE_TRANSPORT_ERROR' }) }
   }
   return res.status(200).json({ ok:true, accountKey:account_key, receivedAt:new Date().toISOString() })
 }
