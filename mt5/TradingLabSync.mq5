@@ -1,15 +1,16 @@
 #property copyright "TradingLab"
-#property version   "1.00"
+#property version   "1.001"
 #property strict
 #property description "Read-only bridge: sends account snapshots to TradingLab. It never trades."
 
 input string ApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/snapshot";
 input string IngestToken = "PASTE_YOUR_INGEST_TOKEN";
-input int SyncEverySeconds = 10;
+input int SyncEverySeconds = 30;
 input int HistoryDays = 7;
 input string WatchedSymbols = "BTCUSD,GOLD";
 
 bool syncing=false;
+datetime lastSnapshotAttempt=0;
 
 string EscapeJson(string value) {
    StringReplace(value,"\\","\\\\");
@@ -50,7 +51,7 @@ string DealsJson() {
    datetime to=TimeCurrent(), from=to-(HistoryDays*86400);
    if(!HistorySelect(from,to)) return "[]";
    string json="["; bool first=true; int added=0;
-   for(int i=HistoryDealsTotal()-1;i>=0 && added<500;i--) {
+   for(int i=HistoryDealsTotal()-1;i>=0 && added<100;i--) {
       ulong ticket=HistoryDealGetTicket(i); if(ticket==0) continue;
       long entry=HistoryDealGetInteger(ticket,DEAL_ENTRY);
       long type=HistoryDealGetInteger(ticket,DEAL_TYPE);
@@ -84,7 +85,7 @@ string SymbolsJson() {
 }
 
 void SendSnapshot() {
-   if(syncing || ApiUrl=="" || IngestToken=="") return; syncing=true;
+   if(syncing || ApiUrl=="" || IngestToken=="" || IngestToken=="PASTE_YOUR_INGEST_TOKEN" || TimeGMT()-lastSnapshotAttempt<25)return; syncing=true;lastSnapshotAttempt=TimeGMT();
    string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\","
       "\"currency\":\""+EscapeJson(AccountInfoString(ACCOUNT_CURRENCY))+"\",\"capturedAt\":\""+IsoTime(TimeGMT())+"\","
       "\"balance\":"+Num(AccountInfoDouble(ACCOUNT_BALANCE),2)+",\"equity\":"+Num(AccountInfoDouble(ACCOUNT_EQUITY),2)+","
@@ -100,7 +101,7 @@ void SendSnapshot() {
 }
 
 int OnInit() {
-   if(SyncEverySeconds<5) { Print("SyncEverySeconds must be at least 5"); return INIT_PARAMETERS_INCORRECT; }
+   if(SyncEverySeconds<25||IngestToken==""||IngestToken=="PASTE_YOUR_INGEST_TOKEN") { Print("TradingLabSync: intervalo o token inválido"); return INIT_PARAMETERS_INCORRECT; }
    EventSetTimer(SyncEverySeconds); SendSnapshot(); return INIT_SUCCEEDED;
 }
 void OnTimer() { SendSnapshot(); }
