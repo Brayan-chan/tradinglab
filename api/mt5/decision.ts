@@ -24,6 +24,6 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
   const db=database(),account_key=accountKey(String(v.server),String(v.login))
   const row={account_key,symbol:v.symbol,timeframe:v.timeframe,mode:v.mode,verdict:v.verdict,side:v.side??null,reason:v.reason,candle_time:candle.toISOString(),evaluated_at:evaluated.toISOString(),entry_price:v.entryPrice??null,stop_loss:v.stopLoss??null,take_profit:v.takeProfit??null,risk_percent:v.riskPercent??null,reward_risk:v.rewardRisk??null,spread_points:v.spreadPoints??null,h1_fast:v.h1Fast??null,h1_slow:v.h1Slow??null,m15_ema:v.m15Ema??null,m15_atr:v.m15Atr??null,m5_ema:v.m5Ema??null}
   const {error}=await db.from('mt5_bot_decisions').insert(row)
-  if(error)return res.status(500).json({ok:false,error:'Decision sync failed'})
+  if(error){console.error('Decision sync failed',error.code);return res.status(500).json({ok:false,error:'Decision sync failed',code:error.code})}
   return res.status(200).json({ok:true,receivedAt:new Date().toISOString()})
 }

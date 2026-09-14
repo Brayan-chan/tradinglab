@@ -1,0 +1,31 @@
+# TradingLab: reinstalación controlada y prueba de conexión
+
+Esta prueba usa exclusivamente la cuenta demo XM y comienza en **SOMBRA**. Guardar las versiones anteriores de los EA como respaldo; no borrar la carpeta de datos de MT5 ni el historial del broker, Supabase o TradingLab. Nunca publicar el `IngestToken` en capturas, commits o mensajes.
+
+## Hoy: sustituir los dos EA, sin habilitar órdenes
+
+1. En MT5, verificar en la barra de título que se trata de la cuenta **Demo** y anotar su número de acceso solo para configurarlo localmente. En cada gráfico BTCUSD, clic derecho → Asesores Expertos → Eliminar. Eliminar solo la instancia del gráfico; esto no borra ni las operaciones ni el archivo fuente.
+2. MT5 → Archivo → Abrir carpeta de datos → `MQL5/Experts`. Antes de sustituir, copiar a una carpeta de respaldo las versiones anteriores de `TradingLabSync.mq5`, `TradingLabSync.ex5`, `TradingLabTrader.mq5` y `TradingLabTrader.ex5`. Copiar ahí las dos versiones nuevas desde la carpeta `mt5` de este repositorio. **No** conservar duplicados con el mismo nombre dentro de `Experts`.
+3. Abrir cada `.mq5` en MetaEditor y pulsar F7. Exigir **0 errores**; revisar cualquier advertencia antes de seguir. Volver a MT5, actualizar «Asesores Expertos» en el Navegador y adjuntar **TradingLabSync** a un gráfico BTCUSD y **TradingLabTrader** a otro gráfico BTCUSD. La estrategia del segundo EA utiliza velas M5 aunque el gráfico visible sea H1 o M1. Evitar adjuntar dos copias del Trader.
+4. En Herramientas → Opciones → Asesores Expertos, autorizar WebRequest **solo** para `https://tradinglab-beryl.vercel.app`. En los parámetros de **ambos** EA introducir el mismo token de ingestión **en MT5**, nunca en el código. Restablecer las entradas anteriores: Sync `SyncEverySeconds=30`; Trader `RunMode=MODE_SHADOW`, `EnableDemoExecution=false`, `AllowedDemoLogin=0`, `RiskPercent=0.25`, `MaxSpreadAtrPercent=5.0`. Confirmar la URL de producción en cada EA. El control «Trading algorítmico» activado no convierte el Trader en demo mientras permanezcan estos bloqueos.
+5. Con conexión y cotizaciones BTCUSD recientes, esperar 2–3 minutos. En **Expertos** confirmar que no aparecen errores continuos de WebRequest/HTTP; en Cuenta MT5 comprobar que el saldo y el estado de cuenta tienen una recepción reciente; en Piloto automático verificar que la fecha de las velas avanza y que cada vela M5 cerrada genera una evaluación nueva. La recepción de velas **no** demuestra por sí sola que las decisiones o el saldo se estén guardando: comprobar los tres por separado. No abrir una orden para probar la conexión.
+
+Después de un corte de luz o reinicio, el EA debe reanudarse al abrir MT5, iniciar sesión y volver a adjuntarse si no figura en el gráfico. Confirmar de nuevo la cuenta, el modo SOMBRA y las tres marcas temporales; ningún historial previo debe desaparecer. Si la web marca «datos atrasados», no interpretar sus cifras como actuales.
+
+## Diagnóstico si falla
+
+Anotar (sin token ni números de cuenta completos): hora CDMX, EA, versión compilada, endpoint (`snapshot`, `decision` o `market`), valor `HTTP`, `error`, y cuerpo de respuesta si existe. `HTTP=-1`/`1001` son fallos de WebRequest/red o plazo de espera; comprobar lista de WebRequest, URL, acceso a Internet y si MT5 sigue recibiendo cotizaciones. Un `HTTP=500` con cuerpo JSON es un error del servidor: la respuesta incluye un código de base de datos para poder revisarlo; **no** prueba que reinstalar el EA lo solucione. Un `200` de velas no implica que snapshot y decisiones tengan `200`. Si el Trader indica «Spread ... > tope ...», el filtro impide evaluar la señal; no es un intento de orden ni indica, por sí solo, un defecto de red. Registrar el spread y el ATR sin aflojar el filtro del 5 % para forzar operaciones.
+
+## Cómo decidir SOMBRA → DEMO
+
+No cambiar de fase automáticamente al acabar el día. Primero exigir varios días de observación con Sync, decisiones M5 y velas frescas; errores HTTP aislados explicados y **sin** una secuencia de fallos persistentes; resultados sombra evaluables suficientes (incluidos spread y costes cuando corresponda), ausencia de duplicados y revisión humana de los rechazos. Un día sin entradas es un resultado válido. Esta prueba de conexión no demuestra rentabilidad.
+
+Cuando se hayan comprobado esos criterios y se haya tomado una nueva decisión consciente de probar ejecuciones demo:
+
+1. Confirmar que la cuenta activa es **Demo**, sin posiciones abiertas, y registrar los parámetros actuales. Configurar **solo Trader**: `AllowedDemoLogin` igual al acceso exacto de esa cuenta demo, `RunMode=MODE_DEMO`, `EnableDemoExecution=true`; conservar 0,25 % por entrada, máximo 1 posición, -1 % diario, 3 pérdidas seguidas, objetivo 2R y spread máximo 5 % del ATR M15.
+2. Confirmar que el EA vuelve a cargar y que indica DEMO. Permanecer presente durante las primeras señales. Un `signal` registrado no es un fill: cotejar el número de deal, precios, SL/TP y resultado de la orden con el **Historial** y **Operaciones** de MT5. Una caída de red o un acuse ambiguo bloquean otro intento sobre la misma vela; no reintentar manualmente sin revisar el historial.
+3. Para detener nuevas órdenes sin borrar datos, quitar Trader del gráfico o devolverlo a `MODE_SHADOW` con `EnableDemoExecution=false` y `AllowedDemoLogin=0`. Las posiciones ya abiertas conservan SL/TP en el broker: revisarlas de forma separada. Cerrar la ventana de MT5 o el portátil interrumpe nuevas evaluaciones y sincronización.
+
+## DEMO → REAL
+
+**No está habilitado en este código.** El Trader actual rechaza cualquier cuenta real, aun cuando se cambien los parámetros. No quitar ese bloqueo ni copiar el EA a una cuenta real como siguiente paso de esta prueba. Harían falta un periodo demo suficiente, conciliación de operaciones y costes reales, análisis de fallos/desconexiones y una implementación nueva revisada con límites independientes y autorización separada. Ni una tasa de acierto ni un 2:1 observado en sombra garantizan resultados en real; con capital reducido, el volumen mínimo, spread y deslizamiento pueden impedir respetar el riesgo fijado.
