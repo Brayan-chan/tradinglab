@@ -6,7 +6,7 @@ Tras desplegar este cambio, recompilar `mt5/TradingLabTrader.mq5` en MetaEditor 
 
 `MarketApiUrl` debe ser `https://tradinglab-beryl.vercel.app/api/mt5/market`; el dominio ya autorizado para WebRequest sigue siendo suficiente. MT5 y el Mac deben permanecer abiertos, con red y sin suspensión. No hace falta mantener abierto el navegador.
 
-El EA envía hasta 240 velas M5 cada 15 segundos. Se guardan mediante upsert en una tabla privada por cuenta/símbolo/hora. El navegador consulta las últimas 1000 y dibuja 100; la última puede estar en formación. No se dibujan datos sintéticos cuando la conexión falla.
+El EA envía 3 velas M5 cada 30 segundos (sin carga histórica inicial). Se guardan mediante upsert en una tabla privada por cuenta/símbolo/hora. El navegador consulta las últimas 1000 y dibuja 100; la última puede estar en formación. No se dibujan datos sintéticos cuando la conexión falla.
 
 ## Alcance y limitaciones
 

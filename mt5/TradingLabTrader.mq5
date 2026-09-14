@@ -1,5 +1,5 @@
 #property copyright "TradingLab"
-#property version   "1.001"
+#property version   "1.002"
 #property strict
 #property description "BTCUSD guarded strategy. Shadow by default; demo execution requires two explicit switches."
 
@@ -32,7 +32,6 @@ CTrade trade;
 int h1FastHandle=INVALID_HANDLE,h1SlowHandle=INVALID_HANDLE,m15EmaHandle=INVALID_HANDLE,m15AtrHandle=INVALID_HANDLE,m5EmaHandle=INVALID_HANDLE;
 datetime lastM5Bar=0;
 datetime lastMarketSync=0;
-bool marketBootstrapped=false;
 bool historyHealthy=true;
 
 string EscapeJson(string value){StringReplace(value,"\\","\\\\");StringReplace(value,"\"","\\\"");StringReplace(value,"\r","\\r");StringReplace(value,"\n","\\n");return value;}
@@ -115,14 +114,14 @@ int OnInit(){
 void SendMarket(){
   if(TimeGMT()-lastMarketSync<30)return;
   MqlRates bars[];ArraySetAsSeries(bars,false);
-  int count=CopyRates(StrategySymbol,PERIOD_M5,0,marketBootstrapped?3:240,bars);if(count<=0)return;
+  int count=CopyRates(StrategySymbol,PERIOD_M5,0,3,bars);if(count<=0)return;
   string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\",\"symbol\":\""+EscapeJson(StrategySymbol)+"\",\"capturedAt\":\""+IsoTime(TimeGMT())+"\",\"bars\":[";
   for(int i=0;i<count;i++){if(i>0)body+=",";body+="{\"time\":"+(string)(long)BrokerTimeToGmt(bars[i].time)+",\"open\":"+NumOrNull(bars[i].open)+",\"high\":"+NumOrNull(bars[i].high)+",\"low\":"+NumOrNull(bars[i].low)+",\"close\":"+NumOrNull(bars[i].close)+"}";}
-  body+="]}";char data[],result[];string headers;int size=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);if(size>0)ArrayResize(data,size-1);
+  body+="]}";char data[],result[];string headers;int size=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
+  if(size<=1||ArrayResize(data,size-1)!=size-1){Print("TradingLab market payload array invalid. bytes=",size," error=",GetLastError());return;}
   ResetLastError();int status=WebRequest("POST",MarketApiUrl,"Content-Type: application/json\r\nAuthorization: Bearer "+IngestToken+"\r\n",5000,data,result,headers);
   lastMarketSync=TimeGMT();
-  if(status==200)marketBootstrapped=true;
-  else Print("TradingLab market sync failed HTTP=",status," error=",GetLastError()," response=",CharArrayToString(result));
+  if(status!=200)Print("TradingLab market sync failed HTTP=",status," error=",GetLastError()," bytes=",ArraySize(data)," response=",CharArrayToString(result));
 }
 void OnTimer(){Evaluate();SendMarket();}
 void OnTick(){Evaluate();}
