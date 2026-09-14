@@ -1,5 +1,5 @@
 #property copyright "TradingLab"
-#property version   "1.001"
+#property version   "1.003"
 #property strict
 #property description "BTCUSD guarded strategy. Shadow by default; demo execution requires two explicit switches."
 
@@ -83,13 +83,15 @@ void Evaluate(){
   if(!InEntryWindow()){SendDecision("outside_session","",InManagementWindow()?"Ventana de gestión: no se permiten entradas nuevas":"Sesión cerrada: las posiciones conservan SL y TP",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   if(OpenPositions()>0){SendDecision("blocked","","Ya existe una posición abierta; una tesis, un riesgo",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   double dayNet;int losses;DailyStats(dayNet,losses);if(!historyHealthy){SendDecision("blocked","","Historial de operaciones no disponible; no se permite evaluar riesgo",closedBar);return;}double balance=AccountInfoDouble(ACCOUNT_BALANCE);if((balance>0&&dayNet<=-balance*DailyLossLimitPercent/100.0)||losses>=MaxConsecutiveLosses){SendDecision("blocked","","Límite diario o racha máxima de pérdidas alcanzada",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
-  if(m15Atr<=0||(tick.ask-tick.bid)>m15Atr*MaxSpreadAtrPercent/100.0){string detail=StringFormat("Spread %.2f > tope %.2f (ATR M15 %.2f; límite %.1f%%); no se evaluó señal",tick.ask-tick.bid,m15Atr*MaxSpreadAtrPercent/100.0,m15Atr,MaxSpreadAtrPercent);SendDecision("blocked","",detail,closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+  if(m15Atr<=0){SendDecision("blocked","","ATR M15 no disponible; no se puede medir el spread ni calcular el stop",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   bool buy=h1Fast>h1Slow&&m15[1].close>m15Ema&&m5[2].close<=m5Ema2&&m5[1].close>m5Ema1&&m5[1].close>m5[1].open;
   bool sell=h1Fast<h1Slow&&m15[1].close<m15Ema&&m5[2].close>=m5Ema2&&m5[1].close<m5Ema1&&m5[1].close<m5[1].open;
   if(!buy&&!sell){SendDecision("no_setup","","Tendencia y retroceso M5 no están alineados",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   double entry=buy?tick.ask:tick.bid,stop=buy?m5[1].low:m5[1].high;for(int i=2;i<=6;i++){if(buy)stop=MathMin(stop,m5[i].low);else stop=MathMax(stop,m5[i].high);}stop+=buy?-m15Atr*0.10:m15Atr*0.10;
   double distance=MathAbs(entry-stop);if(distance<=0){SendDecision("blocked",buy?"buy":"sell","Stop técnico inválido",closedBar,entry,stop,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}double target=buy?entry+distance*RewardRisk:entry-distance*RewardRisk;
   int digits=(int)SymbolInfoInteger(StrategySymbol,SYMBOL_DIGITS);entry=NormalizeDouble(entry,digits);stop=NormalizeDouble(stop,digits);target=NormalizeDouble(target,digits);
+  // Diagnostic signals are evaluated before this execution guard. Never send an order above the spread limit.
+  if((tick.ask-tick.bid)>m15Atr*MaxSpreadAtrPercent/100.0){string detail=StringFormat("Señal teórica %s; spread %.2f > tope %.2f (ATR M15 %.2f; límite %.1f%%); no se envió orden",buy?"COMPRA":"VENTA",tick.ask-tick.bid,m15Atr*MaxSpreadAtrPercent/100.0,m15Atr,MaxSpreadAtrPercent);SendDecision("blocked",buy?"buy":"sell",detail,closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   double volume=VolumeForRisk(entry,stop,buy);
   if(volume<=0){SendDecision("blocked",buy?"buy":"sell","El volumen mínimo de XM excede el riesgo permitido",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   if(RunMode==MODE_SHADOW){SendDecision("signal",buy?"buy":"sell","Señal válida en sombra; no se envió ninguna orden",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);Comment("TradingLab sombra · ",buy?"COMPRA":"VENTA"," · SL ",DoubleToString(stop,digits)," · TP ",DoubleToString(target,digits));return;}
