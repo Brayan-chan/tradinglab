@@ -1,0 +1,217 @@
+diff --git a/api/mt5/decision.ts b/api/mt5/decision.ts
+index 843534a..855be7f 100644
+--- a/api/mt5/decision.ts
++++ b/api/mt5/decision.ts
+@@ -17,13 +17,20 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
+   const v=value as Record<string,unknown>
+   const verdicts=['outside_session','blocked','no_setup','signal','order_sent','error']
+   const sides=[null,'buy','sell']
+-  const numeric=['entryPrice','stopLoss','takeProfit','riskPercent','rewardRisk','spreadPoints','h1Fast','h1Slow','m15Ema','m15Atr','m5Ema']
++  const numeric=['entryPrice','stopLoss','takeProfit','riskPercent','rewardRisk','spreadPoints','h1Fast','h1Slow','m15Ema','m15Atr','m5Ema','volume']
+   if(!short(v.login,32)||!short(v.server,100)||!short(v.symbol,40)||!short(v.timeframe,10)||!['shadow','demo'].includes(String(v.mode))||!verdicts.includes(String(v.verdict))||!sides.includes((v.side??null) as null|'buy'|'sell')||!short(v.reason,500)||!short(v.candleTime,40)||!short(v.evaluatedAt,40)||!numeric.every(key=>finiteOrNull(v[key])))return res.status(400).json({ok:false,error:'Invalid decision'})
+   const evaluated=new Date(String(v.evaluatedAt)),candle=new Date(String(v.candleTime))
+   if(!Number.isFinite(evaluated.getTime())||!Number.isFinite(candle.getTime())||Math.abs(Date.now()-evaluated.getTime())>15*60_000)return res.status(400).json({ok:false,error:'Invalid timestamp'})
+   const db=database(),account_key=accountKey(String(v.server),String(v.login))
+-  const row={account_key,symbol:v.symbol,timeframe:v.timeframe,mode:v.mode,verdict:v.verdict,side:v.side??null,reason:v.reason,candle_time:candle.toISOString(),evaluated_at:evaluated.toISOString(),entry_price:v.entryPrice??null,stop_loss:v.stopLoss??null,take_profit:v.takeProfit??null,risk_percent:v.riskPercent??null,reward_risk:v.rewardRisk??null,spread_points:v.spreadPoints??null,h1_fast:v.h1Fast??null,h1_slow:v.h1Slow??null,m15_ema:v.m15Ema??null,m15_atr:v.m15Atr??null,m5_ema:v.m5Ema??null}
+-  const {error}=await db.from('mt5_bot_decisions').insert(row)
+-  if(error){console.error('Decision sync failed',{code:error.code??null,message:error.message});return res.status(500).json({ok:false,error:'Decision sync failed',code:error.code??'DATABASE_TRANSPORT_ERROR'})}
++  const row={account_key,symbol:v.symbol,timeframe:v.timeframe,mode:v.mode,verdict:v.verdict,side:v.side??null,reason:v.reason,candle_time:candle.toISOString(),evaluated_at:evaluated.toISOString(),entry_price:v.entryPrice??null,stop_loss:v.stopLoss??null,take_profit:v.takeProfit??null,risk_percent:v.riskPercent??null,reward_risk:v.rewardRisk??null,spread_points:v.spreadPoints??null,h1_fast:v.h1Fast??null,h1_slow:v.h1Slow??null,m15_ema:v.m15Ema??null,m15_atr:v.m15Atr??null,m5_ema:v.m5Ema??null,volume:v.volume??null}
++  const inserted=await db.from('mt5_bot_decisions').insert(row).select('id').single()
++  if(inserted.error){console.error('Decision sync failed',{code:inserted.error.code??null,message:inserted.error.message});return res.status(500).json({ok:false,error:'Decision sync failed',code:inserted.error.code??'DATABASE_TRANSPORT_ERROR'})}
++  // Una señal en sombra con niveles y volumen completos queda a la espera de tu aprobación explícita.
++  // No es una orden: es una propuesta que expira sola si no la revisas a tiempo.
++  if(v.verdict==='signal'&&v.mode==='shadow'&&v.side&&finiteOrNull(v.entryPrice)&&v.entryPrice!==null&&finiteOrNull(v.stopLoss)&&v.stopLoss!==null&&finiteOrNull(v.takeProfit)&&v.takeProfit!==null&&finiteOrNull(v.volume)&&v.volume!==null){
++    const pending={account_key,decision_id:inserted.data.id,symbol:v.symbol,side:v.side,entry_price:v.entryPrice,stop_loss:v.stopLoss,take_profit:v.takeProfit,volume:v.volume,candle_time:candle.toISOString(),status:'pending',expires_at:new Date(evaluated.getTime()+5*60_000).toISOString()}
++    const {error:pendingError}=await db.from('mt5_bot_pending_orders').insert(pending)
++    if(pendingError)console.error('Pending order insert failed',{code:pendingError.code??null,message:pendingError.message})
++  }
+   return res.status(200).json({ok:true,receivedAt:new Date().toISOString()})
+ }
+diff --git a/api/mt5/pending-orders.ts b/api/mt5/pending-orders.ts
+new file mode 100644
+index 0000000..bb032fa
+--- /dev/null
++++ b/api/mt5/pending-orders.ts
+@@ -0,0 +1,44 @@
++import type { VercelRequest, VercelResponse } from '@vercel/node'
++import { bearerToken, tokenMatches } from '../_lib/auth.js'
++import { database } from '../_lib/db.js'
++import { noStore } from '../_lib/http.js'
++
++// GET  -> lista señales pendientes de tu aprobación (token de lectura, igual que /state)
++// POST -> aprueba o rechaza una señal puntual (token de acción, separado del de lectura
++//         a propósito: leer el estado y autorizar una entrada son privilegios distintos)
++export default async function handler(req: VercelRequest, res: VercelResponse) {
++  noStore(res)
++  const db = database()
++
++  if (req.method === 'GET') {
++    if (!tokenMatches(bearerToken(req.headers.authorization), process.env.TRADINGLAB_READ_TOKEN)) return res.status(401).json({ ok:false, error:'Unauthorized' })
++    // Expira de forma perezosa cualquier señal vencida antes de listar, sin depender de un cron aparte.
++    await db.from('mt5_bot_pending_orders').update({ status:'expired' }).eq('status','pending').lt('expires_at', new Date().toISOString())
++    const result = await db.from('mt5_bot_pending_orders').select('*').order('created_at',{ ascending:false }).limit(50)
++    if (result.error) return res.status(500).json({ ok:false, error:'Pending orders lookup failed' })
++    return res.status(200).json({ ok:true, orders: result.data })
++  }
++
++  if (req.method === 'POST') {
++    if (!tokenMatches(bearerToken(req.headers.authorization), process.env.TRADINGLAB_ACTION_TOKEN)) return res.status(401).json({ ok:false, error:'Unauthorized' })
++    let value: unknown
++    try { value = typeof req.body === 'string' ? JSON.parse(req.body) : req.body } catch { return res.status(400).json({ ok:false, error:'Invalid JSON' }) }
++    if (!value || typeof value !== 'object') return res.status(400).json({ ok:false, error:'Invalid request' })
++    const v = value as Record<string, unknown>
++    const id = Number(v.id)
++    const action = v.action
++    if (!Number.isInteger(id) || id <= 0 || (action !== 'approve' && action !== 'reject')) return res.status(400).json({ ok:false, error:'Invalid request' })
++    const status = action === 'approve' ? 'approved' : 'rejected'
++    // Solo decide sobre una señal que sigue 'pending' y no venció; evita reabrir algo ya resuelto o caducado.
++    const result = await db.from('mt5_bot_pending_orders')
++      .update({ status, decided_at: new Date().toISOString() })
++      .eq('id', id).eq('status','pending').gt('expires_at', new Date().toISOString())
++      .select('id').maybeSingle()
++    if (result.error) return res.status(500).json({ ok:false, error:'Decision update failed' })
++    if (!result.data) return res.status(409).json({ ok:false, error:'La señal ya no está disponible (expiró o ya fue decidida)' })
++    return res.status(200).json({ ok:true, id, status })
++  }
++
++  res.setHeader('Allow', 'GET, POST')
++  return res.status(405).json({ ok:false, error:'Method not allowed' })
++}
+diff --git a/docs/mt5-test-and-transition.md b/docs/mt5-test-and-transition.md
+index 8029188..8211646 100644
+--- a/docs/mt5-test-and-transition.md
++++ b/docs/mt5-test-and-transition.md
+@@ -7,7 +7,7 @@ Esta prueba usa exclusivamente la cuenta demo XM y comienza en **SOMBRA**. Guard
+ 1. En MT5, verificar en la barra de título que se trata de la cuenta **Demo** y anotar su número de acceso solo para configurarlo localmente. En cada gráfico BTCUSD, clic derecho → Asesores Expertos → Eliminar. Eliminar solo la instancia del gráfico; esto no borra ni las operaciones ni el archivo fuente.
+ 2. MT5 → Archivo → Abrir carpeta de datos → `MQL5/Experts`. Antes de sustituir, copiar a una carpeta de respaldo las versiones anteriores de `TradingLabSync.mq5`, `TradingLabSync.ex5`, `TradingLabTrader.mq5` y `TradingLabTrader.ex5`. Copiar ahí las dos versiones nuevas desde la carpeta `mt5` de este repositorio. **No** conservar duplicados con el mismo nombre dentro de `Experts`.
+ 3. Abrir cada `.mq5` en MetaEditor y pulsar F7. Exigir **0 errores**; revisar cualquier advertencia antes de seguir. Volver a MT5, actualizar «Asesores Expertos» en el Navegador y adjuntar **TradingLabSync** a un gráfico BTCUSD y **TradingLabTrader** a otro gráfico BTCUSD. La estrategia del segundo EA utiliza velas M5 aunque el gráfico visible sea H1 o M1. Evitar adjuntar dos copias del Trader.
+-4. En Herramientas → Opciones → Asesores Expertos, autorizar WebRequest **solo** para `https://tradinglab-beryl.vercel.app`. En los parámetros de **ambos** EA introducir el mismo token de ingestión **en MT5**, nunca en el código. Restablecer las entradas anteriores: Sync `SyncEverySeconds=30`; Trader `RunMode=MODE_SHADOW`, `EnableDemoExecution=false`, `AllowedDemoLogin=0`, `RiskPercent=0.25`, `MaxSpreadAtrPercent=5.0`. Confirmar la URL de producción en cada EA. El control «Trading algorítmico» activado no convierte el Trader en demo mientras permanezcan estos bloqueos.
++4. En Herramientas → Opciones → Asesores Expertos, autorizar WebRequest **solo** para `https://tradinglab-beryl.vercel.app`. En los parámetros de **ambos** EA introducir el mismo token de ingestión **en MT5**, nunca en el código. Restablecer las entradas anteriores: Sync `SyncEverySeconds=30`; Trader `RunMode=MODE_SHADOW`, `EnableDemoExecution=false`, `AllowedDemoLogin=0`, `RiskPercent=0.25`, `MaxSpreadDistancePercent=20.0`. Confirmar la URL de producción en cada EA. El control «Trading algorítmico» activado no convierte el Trader en demo mientras permanezcan estos bloqueos.
+ 5. Con conexión y cotizaciones BTCUSD recientes, esperar 2–3 minutos. En **Expertos** confirmar que no aparecen errores continuos de WebRequest/HTTP; en Cuenta MT5 comprobar que el saldo y el estado de cuenta tienen una recepción reciente; en Piloto automático verificar que la fecha de las velas avanza y que cada vela M5 cerrada genera una evaluación nueva. La recepción de velas **no** demuestra por sí sola que las decisiones o el saldo se estén guardando: comprobar los tres por separado. No abrir una orden para probar la conexión.
+ 
+ Después de un corte de luz o reinicio, el EA debe reanudarse al abrir MT5, iniciar sesión y volver a adjuntarse si no figura en el gráfico. Confirmar de nuevo la cuenta, el modo SOMBRA y las tres marcas temporales; ningún historial previo debe desaparecer. Si la web marca «datos atrasados», no interpretar sus cifras como actuales.
+diff --git a/mt5/TradingLabTrader.mq5 b/mt5/TradingLabTrader.mq5
+index 899bc15..cd4d00b 100644
+--- a/mt5/TradingLabTrader.mq5
++++ b/mt5/TradingLabTrader.mq5
+@@ -25,7 +25,7 @@ input double RiskPercent = 0.25;
+ input double RewardRisk = 2.0;
+ input double DailyLossLimitPercent = 1.0;
+ input int MaxConsecutiveLosses = 3;
+-input double MaxSpreadAtrPercent = 5.0;
++input double MaxSpreadDistancePercent = 20.0; // spread máximo permitido como % de la distancia entrada->stop
+ input ulong MagicNumber = 260911;
+ 
+ CTrade trade;
+@@ -46,8 +46,8 @@ int MexicoMinute(){datetime local=TimeGMT()+MexicoUtcOffsetHours*3600;MqlDateTim
+ bool InEntryWindow(){int now=MexicoMinute(),start=EntryStartHour*60+EntryStartMinute,cutoff=EntryCutoffHour*60+EntryCutoffMinute;return now>=start&&now<cutoff;}
+ bool InManagementWindow(){int now=MexicoMinute(),cutoff=EntryCutoffHour*60+EntryCutoffMinute,end=SessionEndHour*60+SessionEndMinute;return now>=cutoff&&now<end;}
+ 
+-bool SendDecision(string verdict,string side,string reason,datetime candleTime,double entry=EMPTY_VALUE,double sl=EMPTY_VALUE,double tp=EMPTY_VALUE,double spreadPoints=EMPTY_VALUE,double h1Fast=EMPTY_VALUE,double h1Slow=EMPTY_VALUE,double m15Ema=EMPTY_VALUE,double m15Atr=EMPTY_VALUE,double m5Ema=EMPTY_VALUE){
+-  string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\",\"symbol\":\""+EscapeJson(StrategySymbol)+"\",\"timeframe\":\"M5\",\"mode\":\""+ModeName()+"\",\"verdict\":\""+verdict+"\",\"side\":"+(side==""?"null":"\""+side+"\"")+",\"reason\":\""+EscapeJson(reason)+"\",\"candleTime\":\""+IsoTime(BrokerTimeToGmt(candleTime))+"\",\"evaluatedAt\":\""+IsoTime(TimeGMT())+"\",\"entryPrice\":"+NumOrNull(entry)+",\"stopLoss\":"+NumOrNull(sl)+",\"takeProfit\":"+NumOrNull(tp)+",\"riskPercent\":"+DoubleToString(RiskPercent,4)+",\"rewardRisk\":"+DoubleToString(RewardRisk,4)+",\"spreadPoints\":"+NumOrNull(spreadPoints,2)+",\"h1Fast\":"+NumOrNull(h1Fast)+",\"h1Slow\":"+NumOrNull(h1Slow)+",\"m15Ema\":"+NumOrNull(m15Ema)+",\"m15Atr\":"+NumOrNull(m15Atr)+",\"m5Ema\":"+NumOrNull(m5Ema)+"}";
++bool SendDecision(string verdict,string side,string reason,datetime candleTime,double entry=EMPTY_VALUE,double sl=EMPTY_VALUE,double tp=EMPTY_VALUE,double spreadPoints=EMPTY_VALUE,double h1Fast=EMPTY_VALUE,double h1Slow=EMPTY_VALUE,double m15Ema=EMPTY_VALUE,double m15Atr=EMPTY_VALUE,double m5Ema=EMPTY_VALUE,double volume=EMPTY_VALUE){
++  string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\",\"symbol\":\""+EscapeJson(StrategySymbol)+"\",\"timeframe\":\"M5\",\"mode\":\""+ModeName()+"\",\"verdict\":\""+verdict+"\",\"side\":"+(side==""?"null":"\""+side+"\"")+",\"reason\":\""+EscapeJson(reason)+"\",\"candleTime\":\""+IsoTime(BrokerTimeToGmt(candleTime))+"\",\"evaluatedAt\":\""+IsoTime(TimeGMT())+"\",\"entryPrice\":"+NumOrNull(entry)+",\"stopLoss\":"+NumOrNull(sl)+",\"takeProfit\":"+NumOrNull(tp)+",\"riskPercent\":"+DoubleToString(RiskPercent,4)+",\"rewardRisk\":"+DoubleToString(RewardRisk,4)+",\"spreadPoints\":"+NumOrNull(spreadPoints,2)+",\"h1Fast\":"+NumOrNull(h1Fast)+",\"h1Slow\":"+NumOrNull(h1Slow)+",\"m15Ema\":"+NumOrNull(m15Ema)+",\"m15Atr\":"+NumOrNull(m15Atr)+",\"m5Ema\":"+NumOrNull(m5Ema)+",\"volume\":"+NumOrNull(volume,4)+"}";
+   char data[],result[];string responseHeaders;int size=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);if(size>0)ArrayResize(data,size-1);
+   string headers="Content-Type: application/json\r\nAuthorization: Bearer "+IngestToken+"\r\n";ResetLastError();int status=WebRequest("POST",DecisionApiUrl,headers,10000,data,result,responseHeaders);
+   if(status!=200)Print("TradingLab decision sync failed. HTTP=",status," error=",GetLastError()," response=",CharArrayToString(result));
+@@ -83,31 +83,34 @@ void Evaluate(){
+   if(!InEntryWindow()){SendDecision("outside_session","",InManagementWindow()?"Ventana de gestión: no se permiten entradas nuevas":"Sesión cerrada: las posiciones conservan SL y TP",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+   if(OpenPositions()>0){SendDecision("blocked","","Ya existe una posición abierta; una tesis, un riesgo",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+   double dayNet;int losses;DailyStats(dayNet,losses);if(!historyHealthy){SendDecision("blocked","","Historial de operaciones no disponible; no se permite evaluar riesgo",closedBar);return;}double balance=AccountInfoDouble(ACCOUNT_BALANCE);if((balance>0&&dayNet<=-balance*DailyLossLimitPercent/100.0)||losses>=MaxConsecutiveLosses){SendDecision("blocked","","Límite diario o racha máxima de pérdidas alcanzada",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+-  if(m15Atr<=0||(tick.ask-tick.bid)>m15Atr*MaxSpreadAtrPercent/100.0){string detail=StringFormat("Spread %.2f > tope %.2f (ATR M15 %.2f; límite %.1f%%); no se evaluó señal",tick.ask-tick.bid,m15Atr*MaxSpreadAtrPercent/100.0,m15Atr,MaxSpreadAtrPercent);SendDecision("blocked","",detail,closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+   bool buy=h1Fast>h1Slow&&m15[1].close>m15Ema&&m5[2].close<=m5Ema2&&m5[1].close>m5Ema1&&m5[1].close>m5[1].open;
+   bool sell=h1Fast<h1Slow&&m15[1].close<m15Ema&&m5[2].close>=m5Ema2&&m5[1].close<m5Ema1&&m5[1].close<m5[1].open;
+   if(!buy&&!sell){SendDecision("no_setup","","Tendencia y retroceso M5 no están alineados",closedBar,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+   double entry=buy?tick.ask:tick.bid,stop=buy?m5[1].low:m5[1].high;for(int i=2;i<=6;i++){if(buy)stop=MathMin(stop,m5[i].low);else stop=MathMax(stop,m5[i].high);}stop+=buy?-m15Atr*0.10:m15Atr*0.10;
+-  double distance=MathAbs(entry-stop);if(distance<=0){SendDecision("blocked",buy?"buy":"sell","Stop técnico inválido",closedBar,entry,stop,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}double target=buy?entry+distance*RewardRisk:entry-distance*RewardRisk;
++  double distance=MathAbs(entry-stop);if(distance<=0){SendDecision("blocked",buy?"buy":"sell","Stop técnico inválido",closedBar,entry,stop,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
++  // El spread se compara contra la distancia de stop de ESTE trade, no contra el ATR: un spread fijo del bróker
++  // no mide iliquidez, pero sí puede distorsionar el riesgo real si el stop queda demasiado cerca del precio.
++  if((tick.ask-tick.bid)>distance*MaxSpreadDistancePercent/100.0){string detail=StringFormat("Spread %.2f > tope %.2f (distancia stop %.2f; límite %.1f%% de la distancia); no se evaluó señal",tick.ask-tick.bid,distance*MaxSpreadDistancePercent/100.0,distance,MaxSpreadDistancePercent);SendDecision("blocked",buy?"buy":"sell",detail,closedBar,entry,stop,EMPTY_VALUE,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
++  double target=buy?entry+distance*RewardRisk:entry-distance*RewardRisk;
+   int digits=(int)SymbolInfoInteger(StrategySymbol,SYMBOL_DIGITS);entry=NormalizeDouble(entry,digits);stop=NormalizeDouble(stop,digits);target=NormalizeDouble(target,digits);
+   double volume=VolumeForRisk(entry,stop,buy);
+   if(volume<=0){SendDecision("blocked",buy?"buy":"sell","El volumen mínimo de XM excede el riesgo permitido",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
+-  if(RunMode==MODE_SHADOW){SendDecision("signal",buy?"buy":"sell","Señal válida en sombra; no se envió ninguna orden",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);Comment("TradingLab sombra · ",buy?"COMPRA":"VENTA"," · SL ",DoubleToString(stop,digits)," · TP ",DoubleToString(target,digits));return;}
+-  if(!EnableDemoExecution||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin){SendDecision("blocked",buy?"buy":"sell","Ejecución bloqueada: requiere cuenta demo autorizada y dos interruptores",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
++  if(RunMode==MODE_SHADOW){SendDecision("signal",buy?"buy":"sell","Señal válida en sombra; no se envió ninguna orden",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);Comment("TradingLab sombra · ",buy?"COMPRA":"VENTA"," · SL ",DoubleToString(stop,digits)," · TP ",DoubleToString(target,digits));return;}
++  if(!EnableDemoExecution||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin){SendDecision("blocked",buy?"buy":"sell","Ejecución bloqueada: requiere cuenta demo autorizada y dos interruptores",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);return;}
+   string attemptKey="TradingLab.demo."+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"."+(string)MagicNumber;
+   if(GlobalVariableCheck(attemptKey)&&GlobalVariableGet(attemptKey)>=(double)closedBar){SendDecision("blocked","","Intento demo de esta vela ya registrado; se impide duplicado",closedBar);return;}
+   // Fail closed across terminal restarts and uncertain broker acknowledgements.
+   if(GlobalVariableSet(attemptKey,(double)closedBar)==0){Print("TradingLab: no se pudo guardar bloqueo de duplicados");return;}
+   // A positive decision acknowledgement is required before even attempting a demo order.
+-  if(!SendDecision("signal",buy?"buy":"sell","Señal demo registrada; esperando confirmación del broker",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1))return;
++  if(!SendDecision("signal",buy?"buy":"sell","Señal demo registrada; esperando confirmación del broker",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume))return;
+   trade.SetExpertMagicNumber(MagicNumber);trade.SetTypeFillingBySymbol(StrategySymbol);bool sent=buy?trade.Buy(volume,StrategySymbol,0,stop,target,"TradingLab demo"):trade.Sell(volume,StrategySymbol,0,stop,target,"TradingLab demo");
+   bool filled=sent&&trade.ResultRetcode()==TRADE_RETCODE_DONE&&trade.ResultDeal()>0;
+-  SendDecision(filled?"order_sent":"error",buy?"buy":"sell",filled?"Demo ejecutada: ticket "+(string)trade.ResultDeal():"Sin confirmación de ejecución: "+trade.ResultRetcodeDescription(),closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);
++  SendDecision(filled?"order_sent":"error",buy?"buy":"sell",filled?"Demo ejecutada: ticket "+(string)trade.ResultDeal():"Sin confirmación de ejecución: "+trade.ResultRetcodeDescription(),closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);
+   if(!filled)Print("TradingLab demo order not confirmed. retcode=",trade.ResultRetcode()," deal=",trade.ResultDeal()," message=",trade.ResultRetcodeDescription());
+ }
+ 
+ int OnInit(){
+-  if(!SymbolSelect(StrategySymbol,true)||StrategySymbol!="BTCUSD"||RiskPercent<=0||RiskPercent>0.25||RewardRisk<2.0||MaxSpreadAtrPercent<=0||MaxSpreadAtrPercent>5.0||MexicoUtcOffsetHours!=-6||DecisionApiUrl==""||IngestToken==""||IngestToken=="PASTE_YOUR_INGEST_TOKEN"||(RunMode==MODE_DEMO&&(!EnableDemoExecution||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin))){Print("Parámetros de seguridad inválidos o demo no autorizada; EA detenido");return INIT_PARAMETERS_INCORRECT;}
++  if(!SymbolSelect(StrategySymbol,true)||StrategySymbol!="BTCUSD"||RiskPercent<=0||RiskPercent>0.25||RewardRisk<2.0||MaxSpreadDistancePercent<=0||MaxSpreadDistancePercent>30.0||MexicoUtcOffsetHours!=-6||DecisionApiUrl==""||IngestToken==""||IngestToken=="PASTE_YOUR_INGEST_TOKEN"||(RunMode==MODE_DEMO&&(!EnableDemoExecution||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin))){Print("Parámetros de seguridad inválidos o demo no autorizada; EA detenido");return INIT_PARAMETERS_INCORRECT;}
+   h1FastHandle=iMA(StrategySymbol,PERIOD_H1,50,0,MODE_EMA,PRICE_CLOSE);h1SlowHandle=iMA(StrategySymbol,PERIOD_H1,200,0,MODE_EMA,PRICE_CLOSE);m15EmaHandle=iMA(StrategySymbol,PERIOD_M15,50,0,MODE_EMA,PRICE_CLOSE);m15AtrHandle=iATR(StrategySymbol,PERIOD_M15,14);m5EmaHandle=iMA(StrategySymbol,PERIOD_M5,20,0,MODE_EMA,PRICE_CLOSE);
+   if(h1FastHandle==INVALID_HANDLE||h1SlowHandle==INVALID_HANDLE||m15EmaHandle==INVALID_HANDLE||m15AtrHandle==INVALID_HANDLE||m5EmaHandle==INVALID_HANDLE)return INIT_FAILED;
+   EventSetTimer(5);Comment("TradingLabTrader · ",RunMode==MODE_SHADOW?"SOMBRA":"DEMO"," · BTCUSD");return INIT_SUCCEEDED;
+diff --git a/supabase/migrations/20260916230156_pending_orders_and_reviews.sql b/supabase/migrations/20260916230156_pending_orders_and_reviews.sql
+new file mode 100644
+index 0000000..ab28989
+--- /dev/null
++++ b/supabase/migrations/20260916230156_pending_orders_and_reviews.sql
+@@ -0,0 +1,46 @@
++-- Cola de señales que requieren tu aprobación explícita antes de ejecutarse en demo
++create table if not exists public.mt5_bot_pending_orders (
++  id bigint generated always as identity primary key,
++  account_key text not null references public.mt5_accounts(account_key) on delete cascade,
++  decision_id bigint not null references public.mt5_bot_decisions(id) on delete cascade,
++  symbol text not null,
++  side text not null check (side in ('buy','sell')),
++  entry_price numeric not null,
++  stop_loss numeric not null,
++  take_profit numeric not null,
++  volume numeric not null,
++  candle_time timestamptz not null,
++  status text not null default 'pending' check (status in ('pending','approved','rejected','expired','filled')),
++  expires_at timestamptz not null,
++  decided_at timestamptz,
++  created_at timestamptz not null default now()
++);
++
++create index if not exists mt5_bot_pending_orders_status_idx
++  on public.mt5_bot_pending_orders(account_key, status, expires_at);
++
++alter table public.mt5_bot_pending_orders enable row level security;
++revoke all on public.mt5_bot_pending_orders from anon, authenticated;
++grant all on public.mt5_bot_pending_orders to service_role;
++
++-- Post-mortem de cada señal (ganada, perdida o aún pendiente de resultado)
++create table if not exists public.mt5_trade_reviews (
++  id bigint generated always as identity primary key,
++  account_key text not null references public.mt5_accounts(account_key) on delete cascade,
++  decision_id bigint not null references public.mt5_bot_decisions(id) on delete cascade,
++  pending_order_id bigint references public.mt5_bot_pending_orders(id) on delete set null,
++  outcome_status text not null check (outcome_status in ('pending','tp','sl','ambiguous','incomplete','invalid')),
++  r_multiple numeric,
++  resolved_at timestamptz,
++  llm_summary text,
++  llm_model text,
++  reviewed_at timestamptz,
++  created_at timestamptz not null default now()
++);
++
++create index if not exists mt5_trade_reviews_account_idx
++  on public.mt5_trade_reviews(account_key, created_at desc);
++
++alter table public.mt5_trade_reviews enable row level security;
++revoke all on public.mt5_trade_reviews from anon, authenticated;
++grant all on public.mt5_trade_reviews to service_role;
+diff --git a/supabase/migrations/20260916231249_add_volume_to_decisions.sql b/supabase/migrations/20260916231249_add_volume_to_decisions.sql
+new file mode 100644
+index 0000000..a622c4a
+--- /dev/null
++++ b/supabase/migrations/20260916231249_add_volume_to_decisions.sql
+@@ -0,0 +1 @@
++alter table public.mt5_bot_decisions add column if not exists volume numeric;

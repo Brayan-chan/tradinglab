@@ -17,13 +17,20 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
   const v=value as Record<string,unknown>
   const verdicts=['outside_session','blocked','no_setup','signal','order_sent','error']
   const sides=[null,'buy','sell']
-  const numeric=['entryPrice','stopLoss','takeProfit','riskPercent','rewardRisk','spreadPoints','h1Fast','h1Slow','m15Ema','m15Atr','m5Ema']
+  const numeric=['entryPrice','stopLoss','takeProfit','riskPercent','rewardRisk','spreadPoints','h1Fast','h1Slow','m15Ema','m15Atr','m5Ema','volume']
   if(!short(v.login,32)||!short(v.server,100)||!short(v.symbol,40)||!short(v.timeframe,10)||!['shadow','demo'].includes(String(v.mode))||!verdicts.includes(String(v.verdict))||!sides.includes((v.side??null) as null|'buy'|'sell')||!short(v.reason,500)||!short(v.candleTime,40)||!short(v.evaluatedAt,40)||!numeric.every(key=>finiteOrNull(v[key])))return res.status(400).json({ok:false,error:'Invalid decision'})
   const evaluated=new Date(String(v.evaluatedAt)),candle=new Date(String(v.candleTime))
   if(!Number.isFinite(evaluated.getTime())||!Number.isFinite(candle.getTime())||Math.abs(Date.now()-evaluated.getTime())>15*60_000)return res.status(400).json({ok:false,error:'Invalid timestamp'})
   const db=database(),account_key=accountKey(String(v.server),String(v.login))
-  const row={account_key,symbol:v.symbol,timeframe:v.timeframe,mode:v.mode,verdict:v.verdict,side:v.side??null,reason:v.reason,candle_time:candle.toISOString(),evaluated_at:evaluated.toISOString(),entry_price:v.entryPrice??null,stop_loss:v.stopLoss??null,take_profit:v.takeProfit??null,risk_percent:v.riskPercent??null,reward_risk:v.rewardRisk??null,spread_points:v.spreadPoints??null,h1_fast:v.h1Fast??null,h1_slow:v.h1Slow??null,m15_ema:v.m15Ema??null,m15_atr:v.m15Atr??null,m5_ema:v.m5Ema??null}
-  const {error}=await db.from('mt5_bot_decisions').insert(row)
-  if(error){console.error('Decision sync failed',{code:error.code??null,message:error.message});return res.status(500).json({ok:false,error:'Decision sync failed',code:error.code??'DATABASE_TRANSPORT_ERROR'})}
+  const row={account_key,symbol:v.symbol,timeframe:v.timeframe,mode:v.mode,verdict:v.verdict,side:v.side??null,reason:v.reason,candle_time:candle.toISOString(),evaluated_at:evaluated.toISOString(),entry_price:v.entryPrice??null,stop_loss:v.stopLoss??null,take_profit:v.takeProfit??null,risk_percent:v.riskPercent??null,reward_risk:v.rewardRisk??null,spread_points:v.spreadPoints??null,h1_fast:v.h1Fast??null,h1_slow:v.h1Slow??null,m15_ema:v.m15Ema??null,m15_atr:v.m15Atr??null,m5_ema:v.m5Ema??null,volume:v.volume??null}
+  const inserted=await db.from('mt5_bot_decisions').insert(row).select('id').single()
+  if(inserted.error){console.error('Decision sync failed',{code:inserted.error.code??null,message:inserted.error.message});return res.status(500).json({ok:false,error:'Decision sync failed',code:inserted.error.code??'DATABASE_TRANSPORT_ERROR'})}
+  // Una señal en sombra con niveles y volumen completos queda a la espera de tu aprobación explícita.
+  // No es una orden: es una propuesta que expira sola si no la revisas a tiempo.
+  if(v.verdict==='signal'&&v.mode==='shadow'&&v.side&&finiteOrNull(v.entryPrice)&&v.entryPrice!==null&&finiteOrNull(v.stopLoss)&&v.stopLoss!==null&&finiteOrNull(v.takeProfit)&&v.takeProfit!==null&&finiteOrNull(v.volume)&&v.volume!==null){
+    const pending={account_key,decision_id:inserted.data.id,symbol:v.symbol,side:v.side,entry_price:v.entryPrice,stop_loss:v.stopLoss,take_profit:v.takeProfit,volume:v.volume,candle_time:candle.toISOString(),status:'pending',expires_at:new Date(evaluated.getTime()+5*60_000).toISOString()}
+    const {error:pendingError}=await db.from('mt5_bot_pending_orders').insert(pending)
+    if(pendingError)console.error('Pending order insert failed',{code:pendingError.code??null,message:pendingError.message})
+  }
   return res.status(200).json({ok:true,receivedAt:new Date().toISOString()})
 }
