@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Activity, AlertTriangle, BarChart3, BookOpen, Bot, Calculator, Check, ChevronRight, CircleDollarSign, FileUp, FlaskConical, LayoutDashboard, LoaderCircle, LockKeyhole, Menu, Play, Radio, Shield, ShieldAlert, Square, Target, TrendingDown, TrendingUp, X } from 'lucide-react'
+import { Activity, AlertTriangle, BarChart3, BookOpen, Bot, Calculator, Check, ChevronRight, CircleDollarSign, ClipboardCheck, FileUp, FlaskConical, LayoutDashboard, LoaderCircle, LockKeyhole, Menu, Play, Radio, Shield, ShieldAlert, Square, Target, TrendingDown, TrendingUp, X } from 'lucide-react'
 import { calculateRisk } from './lib/risk'
 import { decodeXmReport, metricsFor, parseXmReport } from './lib/xmParser'
 import type { MonteCarloInput,MonteCarloResult } from './lib/monteCarlo'
 import type { JournalEntry, Side, Trade } from './types'
 import { LiveAccount } from './LiveAccount'
 import { Autopilot } from './Autopilot'
+import { PendingApprovals } from './PendingApprovals'
 
-type View = 'dashboard' | 'live' | 'autopilot' | 'risk' | 'simulator' | 'journal'
+type View = 'dashboard' | 'live' | 'autopilot' | 'approvals' | 'risk' | 'simulator' | 'journal'
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 const pct = (value: number) => `${value.toFixed(2)}%`
 
@@ -53,7 +54,7 @@ function App() {
   }
 
   const nav = [
-    ['dashboard', LayoutDashboard, 'Resumen'], ['live', Radio, 'Cuenta MT5'], ['autopilot', Bot, 'Piloto automático'], ['risk', Calculator, 'Planificar operación'],
+    ['dashboard', LayoutDashboard, 'Resumen'], ['live', Radio, 'Cuenta MT5'], ['autopilot', Bot, 'Piloto automático'], ['approvals', ClipboardCheck, 'Aprobación de señales'], ['risk', Calculator, 'Planificar operación'],
     ['simulator', FlaskConical, 'Monte Carlo'], ['journal', BookOpen, 'Diario'],
   ] as const
 
@@ -69,6 +70,7 @@ function App() {
       {view === 'dashboard' && <Dashboard trades={trades} metrics={metrics} onImport={() => fileRef.current?.click()} message={importMessage} />}
       {view === 'live' && <LiveAccount />}
       {view === 'autopilot' && <Autopilot />}
+      {view === 'approvals' && <PendingApprovals />}
       {view === 'risk' && <RiskPlanner />}
       {view === 'simulator' && <MonteCarlo />}
       {view === 'journal' && <Journal entries={journal} setEntries={setJournal} />}
