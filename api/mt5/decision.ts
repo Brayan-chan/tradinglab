@@ -1,7 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { accountKey, bearerToken, tokenMatches } from '../_lib/auth.js'
 import { database } from '../_lib/db.js'
+import { notifyPendingOrder } from '../_lib/email.js'
 import { method, noStore } from '../_lib/http.js'
+
+// Minutos que una señal queda esperando tu aprobación antes de expirar sola. Ajustable sin tocar
+// código: cambia PENDING_ORDER_TTL_MINUTES en Vercel. 30 min si no se define nada.
+const pendingOrderTtlMinutes = (() => { const raw = Number(process.env.PENDING_ORDER_TTL_MINUTES); return Number.isFinite(raw) && raw > 0 ? raw : 30 })()
 
 const finiteOrNull=(value:unknown)=>value===null||value===undefined||(typeof value==='number'&&Number.isFinite(value))
 const short=(value:unknown,max=200)=>typeof value==='string'&&value.length>0&&value.length<=max
@@ -29,9 +34,13 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
   // Una señal en sombra con niveles y volumen completos queda a la espera de tu aprobación explícita.
   // No es una orden: es una propuesta que expira sola si no la revisas a tiempo.
   if(v.verdict==='signal'&&v.mode==='shadow'&&v.side&&finiteOrNull(v.entryPrice)&&v.entryPrice!==null&&finiteOrNull(v.stopLoss)&&v.stopLoss!==null&&finiteOrNull(v.takeProfit)&&v.takeProfit!==null&&finiteOrNull(v.volume)&&v.volume!==null){
-    const pending={account_key,decision_id:inserted.data.id,symbol:v.symbol,side:v.side,entry_price:v.entryPrice,stop_loss:v.stopLoss,take_profit:v.takeProfit,volume:v.volume,candle_time:candle.toISOString(),status:'pending',expires_at:new Date(evaluated.getTime()+5*60_000).toISOString()}
+    const expiresAt=new Date(evaluated.getTime()+pendingOrderTtlMinutes*60_000).toISOString()
+    const pending={account_key,decision_id:inserted.data.id,symbol:v.symbol,side:v.side,entry_price:v.entryPrice,stop_loss:v.stopLoss,take_profit:v.takeProfit,volume:v.volume,candle_time:candle.toISOString(),status:'pending',expires_at:expiresAt}
     const {error:pendingError}=await db.from('mt5_bot_pending_orders').insert(pending)
     if(pendingError)console.error('Pending order insert failed',{code:pendingError.code??null,message:pendingError.message})
+    // El correo nunca bloquea ni hace fallar la respuesta: si EmailJS está mal configurado o caído,
+    // la señal igual queda guardada y visible en el dashboard, solo sin el aviso por correo.
+    else await notifyPendingOrder({symbol:v.symbol as string,side:v.side as 'buy'|'sell',entryPrice:v.entryPrice as number,stopLoss:v.stopLoss as number,takeProfit:v.takeProfit as number,volume:v.volume as number,expiresAt})
   }
   return res.status(200).json({ok:true,receivedAt:new Date().toISOString()})
 }
