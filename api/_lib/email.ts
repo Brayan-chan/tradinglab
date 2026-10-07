@@ -2,7 +2,7 @@
 // Nunca lanza: un fallo de email no debe tumbar el guardado de la decisión ni de la orden pendiente.
 export async function notifyPendingOrder(params: {
   symbol: string; side: 'buy' | 'sell'; entryPrice: number; stopLoss: number; takeProfit: number
-  volume: number; expiresAt: string
+  volume: number; expiresAt: string; autoApproved: boolean
 }): Promise<void> {
   const serviceId = process.env.EMAILJS_SERVICE_ID
   const templateId = process.env.EMAILJS_TEMPLATE_ID
@@ -24,6 +24,7 @@ export async function notifyPendingOrder(params: {
     volume: params.volume.toFixed(2),
     expires_at: expiresLocal,
     app_url: appUrl ? `${appUrl}/` : '',
+    mode_label: params.autoApproved ? 'Aprobada automáticamente (modo auto)' : 'Esperando tu aprobación',
   }
   try {
     const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
