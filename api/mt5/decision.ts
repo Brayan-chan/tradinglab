@@ -34,13 +34,16 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
   // Una señal en sombra con niveles y volumen completos queda a la espera de tu aprobación explícita.
   // No es una orden: es una propuesta que expira sola si no la revisas a tiempo.
   if(v.verdict==='signal'&&v.mode==='shadow'&&v.side&&finiteOrNull(v.entryPrice)&&v.entryPrice!==null&&finiteOrNull(v.stopLoss)&&v.stopLoss!==null&&finiteOrNull(v.takeProfit)&&v.takeProfit!==null&&finiteOrNull(v.volume)&&v.volume!==null){
+    const settings=await db.from('mt5_bot_settings').select('approval_mode').eq('id',true).maybeSingle()
+    const approvalMode=settings.data?.approval_mode==='auto'?'auto':'manual' // ante cualquier duda (fila ausente, error de lectura) nunca asumimos 'auto'
+    const now=new Date().toISOString()
     const expiresAt=new Date(evaluated.getTime()+pendingOrderTtlMinutes*60_000).toISOString()
-    const pending={account_key,decision_id:inserted.data.id,symbol:v.symbol,side:v.side,entry_price:v.entryPrice,stop_loss:v.stopLoss,take_profit:v.takeProfit,volume:v.volume,candle_time:candle.toISOString(),status:'pending',expires_at:expiresAt}
+    const pending={account_key,decision_id:inserted.data.id,symbol:v.symbol,side:v.side,entry_price:v.entryPrice,stop_loss:v.stopLoss,take_profit:v.takeProfit,volume:v.volume,candle_time:candle.toISOString(),status:approvalMode==='auto'?'approved':'pending',expires_at:expiresAt,decided_at:approvalMode==='auto'?now:null}
     const {error:pendingError}=await db.from('mt5_bot_pending_orders').insert(pending)
     if(pendingError)console.error('Pending order insert failed',{code:pendingError.code??null,message:pendingError.message})
     // El correo nunca bloquea ni hace fallar la respuesta: si EmailJS está mal configurado o caído,
     // la señal igual queda guardada y visible en el dashboard, solo sin el aviso por correo.
-    else await notifyPendingOrder({symbol:v.symbol as string,side:v.side as 'buy'|'sell',entryPrice:v.entryPrice as number,stopLoss:v.stopLoss as number,takeProfit:v.takeProfit as number,volume:v.volume as number,expiresAt})
+    else await notifyPendingOrder({symbol:v.symbol as string,side:v.side as 'buy'|'sell',entryPrice:v.entryPrice as number,stopLoss:v.stopLoss as number,takeProfit:v.takeProfit as number,volume:v.volume as number,expiresAt,autoApproved:approvalMode==='auto'})
   }
   return res.status(200).json({ok:true,receivedAt:new Date().toISOString()})
 }
