@@ -41,6 +41,22 @@ export async function fetchPendingOrders(token:string, signal?:AbortSignal):Prom
   return body.orders
 }
 
+export type ApprovalMode='manual'|'auto'
+
+export async function fetchApprovalMode(token:string, signal?:AbortSignal):Promise<ApprovalMode> {
+  const response=await fetch('/api/mt5/settings',{headers:{Authorization:`Bearer ${token}`},signal,cache:'no-store'})
+  if(response.status===401) throw new Error('Token de lectura incorrecto.')
+  if(!response.ok) throw new Error('No se pudo consultar el modo de aprobación.')
+  const body=await response.json() as {ok:true;approvalMode:ApprovalMode}
+  return body.approvalMode
+}
+
+export async function setApprovalMode(actionToken:string, mode:ApprovalMode):Promise<void> {
+  const response=await fetch('/api/mt5/settings',{method:'POST',headers:{Authorization:`Bearer ${actionToken}`,'Content-Type':'application/json'},body:JSON.stringify({approvalMode:mode})})
+  if(response.status===401) throw new Error('Token de acción incorrecto.')
+  if(!response.ok) throw new Error('No se pudo cambiar el modo de aprobación.')
+}
+
 export async function decidePendingOrder(actionToken:string, id:number, action:'approve'|'reject'):Promise<void> {
   const response=await fetch('/api/mt5/pending-orders',{method:'POST',headers:{Authorization:`Bearer ${actionToken}`,'Content-Type':'application/json'},body:JSON.stringify({id,action})})
   if(response.status===401) throw new Error('Token de acción incorrecto.')
