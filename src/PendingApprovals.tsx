@@ -1,6 +1,6 @@
 import { useCallback,useEffect,useState } from 'react'
-import { AlertTriangle,Check,Clock3,KeyRound,RefreshCw,X } from 'lucide-react'
-import { decidePendingOrder,fetchPendingOrders,type PendingOrder } from './lib/mt5'
+import { AlertTriangle,Bot,Check,Clock3,KeyRound,RefreshCw,UserCheck,X } from 'lucide-react'
+import { decidePendingOrder,fetchApprovalMode,fetchPendingOrders,setApprovalMode,type ApprovalMode,type PendingOrder } from './lib/mt5'
 
 const clock=(value:string)=>new Intl.DateTimeFormat('es-MX',{timeZone:'America/Mexico_City',dateStyle:'short',timeStyle:'medium'}).format(new Date(value))
 const price=(value:number)=>new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(value)
@@ -18,11 +18,15 @@ export function PendingApprovals(){
   const [actionToken,setActionToken]=useState(()=>localStorage.getItem('tradinglab:action-token')??'')
   const [actionDraft,setActionDraft]=useState('')
   const [orders,setOrders]=useState<PendingOrder[]>([]),[loading,setLoading]=useState(false),[error,setError]=useState(''),[busyId,setBusyId]=useState<number|null>(null),[now,setNow]=useState(Date.now())
+  const [mode,setMode]=useState<ApprovalMode|null>(null),[modeBusy,setModeBusy]=useState(false)
 
   const refresh=useCallback(async(signal?:AbortSignal)=>{
     if(!readToken)return
     setLoading(true)
-    try{setOrders(await fetchPendingOrders(readToken,signal));setError('')}
+    try{
+      const [list,currentMode]=await Promise.all([fetchPendingOrders(readToken,signal),fetchApprovalMode(readToken,signal)])
+      setOrders(list);setMode(currentMode);setError('')
+    }
     catch(reason){if(!signal?.aborted)setError(reason instanceof Error?reason.message:'No se pudieron consultar las señales.')}
     finally{if(!signal?.aborted)setLoading(false)}
   },[readToken])
@@ -33,6 +37,15 @@ export function PendingApprovals(){
     const timer=window.setInterval(()=>{setNow(Date.now());refresh(controller.signal)},15_000)
     return()=>{controller.abort();window.clearInterval(timer)}
   },[refresh])
+
+  async function toggleMode(){
+    if(!actionToken||!mode){setError('Configura el token de acción antes de cambiar el modo.');return}
+    const next=mode==='manual'?'auto':'manual'
+    setModeBusy(true)
+    try{await setApprovalMode(actionToken,next);setMode(next)}
+    catch(reason){setError(reason instanceof Error?reason.message:'No se pudo cambiar el modo.')}
+    finally{setModeBusy(false)}
+  }
 
   async function decide(id:number, action:'approve'|'reject'){
     if(!actionToken){setError('Configura el token de acción antes de decidir.');return}
@@ -52,6 +65,19 @@ export function PendingApprovals(){
     <div className="page-title"><div><span className="eyebrow">CONFIRMACIÓN HUMANA REQUERIDA</span><h1>Señales esperando tu aprobación.</h1><p>Ninguna se ejecuta en MT5 sin que la apruebes aquí, y cada una expira sola si no decides a tiempo.</p></div>
       <div className={`status-badge ${pending.length?'blocked':'approved'}`}>{pending.length?<AlertTriangle/>:<Check/>}{pending.length?`${pending.length} esperando decisión`:'Sin señales pendientes'}</div>
     </div>
+
+    {mode&&<article className="panel latest-decision" style={{marginBottom:16}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {mode==='auto'?<Bot/>:<UserCheck/>}
+          <div>
+            <strong>Modo {mode==='auto'?'automático':'manual'}</strong>
+            <p style={{margin:'2px 0 0',fontSize:13,color:'var(--text-muted,#888)'}}>{mode==='auto'?'Cada señal se aprueba sola al crearse, sin esperar tu clic.':'Cada señal espera tu aprobación o se vence sola.'}</p>
+          </div>
+        </div>
+        <button className={mode==='auto'?'secondary':'primary'} disabled={modeBusy||!actionToken} onClick={toggleMode}>{modeBusy?'...':mode==='auto'?'Pasar a manual':'Pasar a automático'}</button>
+      </div>
+    </article>}
 
     {!actionToken&&<article className="panel token-panel"><KeyRound/><h2>Token de acción</h2><p>Distinto del token de lectura: aprobar o rechazar una señal necesita este segundo token (el mismo valor que pusiste en TRADINGLAB_ACTION_TOKEN en Vercel).</p><label className="field"><span>Token</span><div><input type="password" value={actionDraft} onChange={e=>setActionDraft(e.target.value)} autoComplete="off"/></div></label><button className="primary wide" onClick={()=>{const value=actionDraft.trim();localStorage.setItem('tradinglab:action-token',value);setActionToken(value)}}>Guardar token de acción</button></article>}
 
