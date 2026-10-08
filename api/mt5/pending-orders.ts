@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { bearerToken, tokenMatches } from '../_lib/auth.js'
 import { database } from '../_lib/db.js'
 import { noStore } from '../_lib/http.js'
+import { resolvePendingReviews } from '../_lib/resolveReviews.js'
 
 // GET  -> lista señales pendientes de tu aprobación (token de lectura, igual que /state)
 // POST -> aprueba o rechaza una señal puntual (token de acción, separado del de lectura
@@ -14,9 +15,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!tokenMatches(bearerToken(req.headers.authorization), process.env.TRADINGLAB_READ_TOKEN)) return res.status(401).json({ ok:false, error:'Unauthorized' })
     // Expira de forma perezosa cualquier señal vencida antes de listar, sin depender de un cron aparte.
     await db.from('mt5_bot_pending_orders').update({ status:'expired' }).eq('status','pending').lt('expires_at', new Date().toISOString())
+    // Resuelve resultados pendientes (simulados en sombra, reales en demo) de paso al abrir el dashboard.
+    await resolvePendingReviews(db)
     const result = await db.from('mt5_bot_pending_orders').select('*').order('created_at',{ ascending:false }).limit(50)
     if (result.error) return res.status(500).json({ ok:false, error:'Pending orders lookup failed' })
-    return res.status(200).json({ ok:true, orders: result.data })
+    const ids = (result.data ?? []).map(o => o.id)
+    const reviews = ids.length ? await db.from('mt5_trade_reviews').select('pending_order_id,outcome_status,r_multiple').in('pending_order_id', ids) : { data: [] as { pending_order_id:number; outcome_status:string; r_multiple:number|null }[] }
+    const byOrder = new Map((reviews.data ?? []).map(r => [r.pending_order_id, r]))
+    const orders = (result.data ?? []).map(o => ({ ...o, outcome: byOrder.get(o.id) ?? null }))
+    return res.status(200).json({ ok:true, orders })
   }
 
   if (req.method === 'POST') {

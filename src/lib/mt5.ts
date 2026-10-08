@@ -24,6 +24,7 @@ export interface LiveState { ok:true; account:LiveAccount|null; positions:LivePo
 export interface PendingOrder {
   id:number; symbol:string; side:'buy'|'sell'; entry_price:number; stop_loss:number; take_profit:number; volume:number
   candle_time:string; status:'pending'|'approved'|'rejected'|'expired'|'filled'; expires_at:string; decided_at:string|null; created_at:string
+  outcome:{outcome_status:'pending'|'tp'|'sl'|'ambiguous'|'incomplete'|'invalid'; r_multiple:number|null}|null
 }
 
 export async function fetchMt5State(token:string, signal?:AbortSignal):Promise<LiveState> {

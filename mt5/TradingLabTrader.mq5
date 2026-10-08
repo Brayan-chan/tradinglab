@@ -9,6 +9,7 @@ enum TradingLabMode { MODE_SHADOW=0, MODE_DEMO=1 };
 
 input string DecisionApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/decision";
 input string MarketApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/market";
+input string ApprovedOrderApiUrl = "https://tradinglab-beryl.vercel.app/api/mt5/next-approved-order";
 input string IngestToken = "PASTE_YOUR_INGEST_TOKEN";
 input TradingLabMode RunMode = MODE_SHADOW;
 input bool EnableDemoExecution = false;
@@ -46,8 +47,8 @@ int MexicoMinute(){datetime local=TimeGMT()+MexicoUtcOffsetHours*3600;MqlDateTim
 bool InEntryWindow(){int now=MexicoMinute(),start=EntryStartHour*60+EntryStartMinute,cutoff=EntryCutoffHour*60+EntryCutoffMinute;return now>=start&&now<cutoff;}
 bool InManagementWindow(){int now=MexicoMinute(),cutoff=EntryCutoffHour*60+EntryCutoffMinute,end=SessionEndHour*60+SessionEndMinute;return now>=cutoff&&now<end;}
 
-bool SendDecision(string verdict,string side,string reason,datetime candleTime,double entry=EMPTY_VALUE,double sl=EMPTY_VALUE,double tp=EMPTY_VALUE,double spreadPoints=EMPTY_VALUE,double h1Fast=EMPTY_VALUE,double h1Slow=EMPTY_VALUE,double m15Ema=EMPTY_VALUE,double m15Atr=EMPTY_VALUE,double m5Ema=EMPTY_VALUE,double volume=EMPTY_VALUE,int matchScore=-1){
-  string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\",\"symbol\":\""+EscapeJson(StrategySymbol)+"\",\"timeframe\":\"M5\",\"mode\":\""+ModeName()+"\",\"verdict\":\""+verdict+"\",\"side\":"+(side==""?"null":"\""+side+"\"")+",\"reason\":\""+EscapeJson(reason)+"\",\"candleTime\":\""+IsoTime(BrokerTimeToGmt(candleTime))+"\",\"evaluatedAt\":\""+IsoTime(TimeGMT())+"\",\"entryPrice\":"+NumOrNull(entry)+",\"stopLoss\":"+NumOrNull(sl)+",\"takeProfit\":"+NumOrNull(tp)+",\"riskPercent\":"+DoubleToString(RiskPercent,4)+",\"rewardRisk\":"+DoubleToString(RewardRisk,4)+",\"spreadPoints\":"+NumOrNull(spreadPoints,2)+",\"h1Fast\":"+NumOrNull(h1Fast)+",\"h1Slow\":"+NumOrNull(h1Slow)+",\"m15Ema\":"+NumOrNull(m15Ema)+",\"m15Atr\":"+NumOrNull(m15Atr)+",\"m5Ema\":"+NumOrNull(m5Ema)+",\"volume\":"+NumOrNull(volume,4)+",\"matchScore\":"+(matchScore<0?"null":(string)matchScore)+"}";
+bool SendDecision(string verdict,string side,string reason,datetime candleTime,double entry=EMPTY_VALUE,double sl=EMPTY_VALUE,double tp=EMPTY_VALUE,double spreadPoints=EMPTY_VALUE,double h1Fast=EMPTY_VALUE,double h1Slow=EMPTY_VALUE,double m15Ema=EMPTY_VALUE,double m15Atr=EMPTY_VALUE,double m5Ema=EMPTY_VALUE,double volume=EMPTY_VALUE,int matchScore=-1,long pendingOrderId=-1,string positionTicket=""){
+  string body="{\"login\":\""+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"\",\"server\":\""+EscapeJson(AccountInfoString(ACCOUNT_SERVER))+"\",\"symbol\":\""+EscapeJson(StrategySymbol)+"\",\"timeframe\":\"M5\",\"mode\":\""+ModeName()+"\",\"verdict\":\""+verdict+"\",\"side\":"+(side==""?"null":"\""+side+"\"")+",\"reason\":\""+EscapeJson(reason)+"\",\"candleTime\":\""+IsoTime(BrokerTimeToGmt(candleTime))+"\",\"evaluatedAt\":\""+IsoTime(TimeGMT())+"\",\"entryPrice\":"+NumOrNull(entry)+",\"stopLoss\":"+NumOrNull(sl)+",\"takeProfit\":"+NumOrNull(tp)+",\"riskPercent\":"+DoubleToString(RiskPercent,4)+",\"rewardRisk\":"+DoubleToString(RewardRisk,4)+",\"spreadPoints\":"+NumOrNull(spreadPoints,2)+",\"h1Fast\":"+NumOrNull(h1Fast)+",\"h1Slow\":"+NumOrNull(h1Slow)+",\"m15Ema\":"+NumOrNull(m15Ema)+",\"m15Atr\":"+NumOrNull(m15Atr)+",\"m5Ema\":"+NumOrNull(m5Ema)+",\"volume\":"+NumOrNull(volume,4)+",\"matchScore\":"+(matchScore<0?"null":(string)matchScore)+",\"pendingOrderId\":"+(pendingOrderId<=0?"null":(string)pendingOrderId)+",\"positionTicket\":"+(positionTicket==""?"null":"\""+EscapeJson(positionTicket)+"\"")+"}";
   char data[],result[];string responseHeaders;int size=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);if(size>0)ArrayResize(data,size-1);
   string headers="Content-Type: application/json\r\nAuthorization: Bearer "+IngestToken+"\r\n";ResetLastError();int status=WebRequest("POST",DecisionApiUrl,headers,10000,data,result,responseHeaders);
   if(status!=200)Print("TradingLab decision sync failed. HTTP=",status," error=",GetLastError()," response=",CharArrayToString(result));
@@ -113,20 +114,44 @@ void Evaluate(){
   if(volume<=0){SendDecision("blocked",buy?"buy":"sell","El volumen mínimo de XM excede el riesgo permitido",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1);return;}
   if(RunMode==MODE_SHADOW){SendDecision("signal",buy?"buy":"sell","Señal válida en sombra; no se envió ninguna orden",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);Comment("TradingLab sombra · ",buy?"COMPRA":"VENTA"," · SL ",DoubleToString(stop,digits)," · TP ",DoubleToString(target,digits));return;}
   if(!EnableDemoExecution||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin){SendDecision("blocked",buy?"buy":"sell","Ejecución bloqueada: requiere cuenta demo autorizada y dos interruptores",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);return;}
-  string attemptKey="TradingLab.demo."+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"."+(string)MagicNumber;
-  if(GlobalVariableCheck(attemptKey)&&GlobalVariableGet(attemptKey)>=(double)closedBar){SendDecision("blocked","","Intento demo de esta vela ya registrado; se impide duplicado",closedBar);return;}
-  // Fail closed across terminal restarts and uncertain broker acknowledgements.
-  if(GlobalVariableSet(attemptKey,(double)closedBar)==0){Print("TradingLab: no se pudo guardar bloqueo de duplicados");return;}
-  // A positive decision acknowledgement is required before even attempting a demo order.
-  if(!SendDecision("signal",buy?"buy":"sell","Señal demo registrada; esperando confirmación del broker",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume))return;
-  trade.SetExpertMagicNumber(MagicNumber);trade.SetTypeFillingBySymbol(StrategySymbol);bool sent=buy?trade.Buy(volume,StrategySymbol,0,stop,target,"TradingLab demo"):trade.Sell(volume,StrategySymbol,0,stop,target,"TradingLab demo");
+  // Ya NO se ejecuta aquí mismo. Se registra la propuesta (decision.ts crea la orden pendiente) y
+  // queda a la espera de aprobación —tuya desde el dashboard, o automática si activaste ese modo—.
+  // TryExecuteApproved() es quien de verdad manda la orden, en un tick posterior, solo si sigue vigente.
+  SendDecision("signal",buy?"buy":"sell","Señal demo registrada; esperando aprobación antes de ejecutar",closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);
+  Comment("TradingLab demo · ",buy?"COMPRA":"VENTA"," propuesta · SL ",DoubleToString(stop,digits)," · TP ",DoubleToString(target,digits)," · esperando aprobación");
+}
+
+// Revisa si hay una orden aprobada vigente y la ejecuta. Nunca recalcula niveles: usa exactamente
+// lo que se aprobó. Vuelve a validar las 4 llaves de seguridad en cada llamada, nunca confía en un
+// estado guardado de antes — y revalida que el stop siga del lado correcto del precio actual, por si
+// el mercado se movió mucho entre que se aprobó y que se ejecuta.
+void TryExecuteApproved(){
+  if(RunMode!=MODE_DEMO)return;
+  if(!EnableDemoExecution||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin)return;
+  if(OpenPositions()>0)return;
+  string url=ApprovedOrderApiUrl+"?login="+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"&server="+AccountInfoString(ACCOUNT_SERVER)+"&symbol="+StrategySymbol;
+  char empty[],result[];string responseHeaders;ResetLastError();
+  int status=WebRequest("GET",url,"Authorization: Bearer "+IngestToken+"\r\n",5000,empty,result,responseHeaders);
+  if(status!=200)return; // sondeo rutinario cada pocos segundos; un fallo puntual no amerita registrar nada
+  string body=CharArrayToString(result);
+  if(body=="NONE"||body=="ERROR"||body=="")return;
+  string parts[];if(StringSplit(body,'|',parts)!=6)return;
+  long pendingId=StringToInteger(parts[0]);bool buy=parts[1]=="buy";
+  double entry=StringToDouble(parts[2]),stop=StringToDouble(parts[3]),target=StringToDouble(parts[4]),volume=StringToDouble(parts[5]);
+  if(pendingId<=0||volume<=0||entry<=0||stop<=0||target<=0)return;
+  MqlTick tick;if(!SymbolInfoTick(StrategySymbol,tick))return;
+  if(buy&&stop>=tick.bid)return;if(!buy&&stop<=tick.ask)return; // el stop ya no tiene sentido vs. el precio actual
+  trade.SetExpertMagicNumber(MagicNumber);trade.SetTypeFillingBySymbol(StrategySymbol);
+  bool sent=buy?trade.Buy(volume,StrategySymbol,0,stop,target,"TradingLab demo aprobado"):trade.Sell(volume,StrategySymbol,0,stop,target,"TradingLab demo aprobado");
   bool filled=sent&&trade.ResultRetcode()==TRADE_RETCODE_DONE&&trade.ResultDeal()>0;
-  SendDecision(filled?"order_sent":"error",buy?"buy":"sell",filled?"Demo ejecutada: ticket "+(string)trade.ResultDeal():"Sin confirmación de ejecución: "+trade.ResultRetcodeDescription(),closedBar,entry,stop,target,spreadPoints,h1Fast,h1Slow,m15Ema,m15Atr,m5Ema1,volume);
-  if(!filled)Print("TradingLab demo order not confirmed. retcode=",trade.ResultRetcode()," deal=",trade.ResultDeal()," message=",trade.ResultRetcodeDescription());
+  string positionTicket="";
+  if(filled){ulong dealTicket=trade.ResultDeal();if(HistoryDealSelect(dealTicket))positionTicket=(string)HistoryDealGetInteger(dealTicket,DEAL_POSITION_ID);}
+  SendDecision(filled?"order_sent":"error",buy?"buy":"sell",filled?"Demo ejecutada desde aprobación: ticket "+(string)trade.ResultDeal():"Sin confirmación de ejecución: "+trade.ResultRetcodeDescription(),TimeCurrent(),entry,stop,target,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,EMPTY_VALUE,volume,-1,pendingId,positionTicket);
+  if(!filled)Print("TradingLab demo (aprobado) sin confirmar. retcode=",trade.ResultRetcode()," deal=",trade.ResultDeal()," message=",trade.ResultRetcodeDescription());
 }
 
 int OnInit(){
-  if(!SymbolSelect(StrategySymbol,true)||StrategySymbol!="BTCUSD"||RiskPercent<=0||RiskPercent>0.25||RewardRisk<2.0||MaxSpreadDistancePercent<=0||MaxSpreadDistancePercent>30.0||MexicoUtcOffsetHours!=-6||DecisionApiUrl==""||IngestToken==""||IngestToken=="PASTE_YOUR_INGEST_TOKEN"||(RunMode==MODE_DEMO&&(!EnableDemoExecution||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin))){Print("Parámetros de seguridad inválidos o demo no autorizada; EA detenido");return INIT_PARAMETERS_INCORRECT;}
+  if(!SymbolSelect(StrategySymbol,true)||StrategySymbol!="BTCUSD"||RiskPercent<=0||RiskPercent>0.25||RewardRisk<2.0||MaxSpreadDistancePercent<=0||MaxSpreadDistancePercent>30.0||MexicoUtcOffsetHours!=-6||DecisionApiUrl==""||ApprovedOrderApiUrl==""||IngestToken==""||IngestToken=="PASTE_YOUR_INGEST_TOKEN"||(RunMode==MODE_DEMO&&(!EnableDemoExecution||AllowedDemoLogin<=0||AccountInfoInteger(ACCOUNT_TRADE_MODE)!=ACCOUNT_TRADE_MODE_DEMO||AccountInfoInteger(ACCOUNT_LOGIN)!=AllowedDemoLogin))){Print("Parámetros de seguridad inválidos o demo no autorizada; EA detenido");return INIT_PARAMETERS_INCORRECT;}
   h1FastHandle=iMA(StrategySymbol,PERIOD_H1,50,0,MODE_EMA,PRICE_CLOSE);h1SlowHandle=iMA(StrategySymbol,PERIOD_H1,200,0,MODE_EMA,PRICE_CLOSE);m15EmaHandle=iMA(StrategySymbol,PERIOD_M15,50,0,MODE_EMA,PRICE_CLOSE);m15AtrHandle=iATR(StrategySymbol,PERIOD_M15,14);m5EmaHandle=iMA(StrategySymbol,PERIOD_M5,20,0,MODE_EMA,PRICE_CLOSE);
   if(h1FastHandle==INVALID_HANDLE||h1SlowHandle==INVALID_HANDLE||m15EmaHandle==INVALID_HANDLE||m15AtrHandle==INVALID_HANDLE||m5EmaHandle==INVALID_HANDLE)return INIT_FAILED;
   EventSetTimer(5);Comment("TradingLabTrader · ",RunMode==MODE_SHADOW?"SOMBRA":"DEMO"," · BTCUSD");return INIT_SUCCEEDED;
@@ -143,6 +168,6 @@ void SendMarket(){
   if(status==200)marketBootstrapped=true;
   else Print("TradingLab market sync failed HTTP=",status," error=",GetLastError()," response=",CharArrayToString(result));
 }
-void OnTimer(){Evaluate();SendMarket();}
+void OnTimer(){Evaluate();TryExecuteApproved();SendMarket();}
 void OnTick(){Evaluate();}
 void OnDeinit(const int reason){EventKillTimer();if(h1FastHandle!=INVALID_HANDLE)IndicatorRelease(h1FastHandle);if(h1SlowHandle!=INVALID_HANDLE)IndicatorRelease(h1SlowHandle);if(m15EmaHandle!=INVALID_HANDLE)IndicatorRelease(m15EmaHandle);if(m15AtrHandle!=INVALID_HANDLE)IndicatorRelease(m15AtrHandle);if(m5EmaHandle!=INVALID_HANDLE)IndicatorRelease(m5EmaHandle);Comment("");}

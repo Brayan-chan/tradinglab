@@ -5,6 +5,7 @@ import { decidePendingOrder,fetchApprovalMode,fetchPendingOrders,setApprovalMode
 const clock=(value:string)=>new Intl.DateTimeFormat('es-MX',{timeZone:'America/Mexico_City',dateStyle:'short',timeStyle:'medium'}).format(new Date(value))
 const price=(value:number)=>new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(value)
 const statusLabel=(value:string)=>({pending:'Pendiente',approved:'Aprobada',rejected:'Rechazada',expired:'Expirada',filled:'Ejecutada'} as Record<string,string>)[value]??value
+const outcomeLabel=(value:string)=>({pending:'Esperando resultado',tp:'Ganada',sl:'Perdida',ambiguous:'Ambiguo (SL y TP en la misma vela)',incomplete:'Faltan velas',invalid:'Inválida'} as Record<string,string>)[value]??value
 
 function countdown(expiresAt:string, now:number){
   const ms=new Date(expiresAt).getTime()-now
@@ -105,13 +106,17 @@ export function PendingApprovals(){
     <article className="panel decision-history">
       <div className="panel-head"><div><span className="eyebrow">TRAZABILIDAD</span><h2>Historial de decisiones</h2></div><small>{decided.length} resueltas</small></div>
       <div className="decision-table">
-        <div className="decision-row heading"><span>Vela</span><span>Estado</span><span>Dirección</span><span>Precios</span><span>Decidida</span></div>
-        {decided.map(order=><div className="decision-row" key={order.id}>
+        <div className="approvals-row heading"><span>Vela</span><span>Estado</span><span>Dirección</span><span>Precios</span><span>Decidida</span><span>Resultado</span></div>
+        {decided.map(order=><div className="approvals-row" key={order.id}>
           <time>{clock(order.candle_time)}</time>
           <b className={`verdict-text ${order.status==='approved'||order.status==='filled'?'signal':order.status==='rejected'?'blocked':'no_setup'}`}>{statusLabel(order.status)}</b>
           <span>{order.side==='buy'?'Compra':'Venta'}</span>
           <span>{price(order.entry_price)} / {price(order.stop_loss)} / {price(order.take_profit)}</span>
           <p>{order.decided_at?clock(order.decided_at):'—'}</p>
+          {order.outcome?<p>
+            <b className={`outcome-text ${order.outcome.outcome_status}`}>{order.status==='filled'?'Real: ':'Simulado: '}{outcomeLabel(order.outcome.outcome_status)}</b>
+            {order.outcome.r_multiple!==null&&<span> ({order.outcome.r_multiple>0?'+':''}{order.outcome.r_multiple.toFixed(2)}R)</span>}
+          </p>:<p>{order.status==='rejected'?'—':'Calculando...'}</p>}
         </div>)}
         {!decided.length&&<p className="empty-row">Todavía no hay señales decididas.</p>}
       </div>

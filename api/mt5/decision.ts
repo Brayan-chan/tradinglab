@@ -25,15 +25,18 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
   const numeric=['entryPrice','stopLoss','takeProfit','riskPercent','rewardRisk','spreadPoints','h1Fast','h1Slow','m15Ema','m15Atr','m5Ema','volume']
   if(!short(v.login,32)||!short(v.server,100)||!short(v.symbol,40)||!short(v.timeframe,10)||!['shadow','demo'].includes(String(v.mode))||!verdicts.includes(String(v.verdict))||!sides.includes((v.side??null) as null|'buy'|'sell')||!short(v.reason,500)||!short(v.candleTime,40)||!short(v.evaluatedAt,40)||!numeric.every(key=>finiteOrNull(v[key])))return res.status(400).json({ok:false,error:'Invalid decision'})
   if(v.matchScore!==null&&v.matchScore!==undefined&&(!Number.isInteger(v.matchScore)||(v.matchScore as number)<0||(v.matchScore as number)>3))return res.status(400).json({ok:false,error:'Invalid matchScore'})
+  if(v.pendingOrderId!==null&&v.pendingOrderId!==undefined&&(!Number.isInteger(v.pendingOrderId)||(v.pendingOrderId as number)<=0))return res.status(400).json({ok:false,error:'Invalid pendingOrderId'})
+  if(v.positionTicket!==null&&v.positionTicket!==undefined&&!short(v.positionTicket,64))return res.status(400).json({ok:false,error:'Invalid positionTicket'})
   const evaluated=new Date(String(v.evaluatedAt)),candle=new Date(String(v.candleTime))
   if(!Number.isFinite(evaluated.getTime())||!Number.isFinite(candle.getTime())||Math.abs(Date.now()-evaluated.getTime())>15*60_000)return res.status(400).json({ok:false,error:'Invalid timestamp'})
   const db=database(),account_key=accountKey(String(v.server),String(v.login))
   const row={account_key,symbol:v.symbol,timeframe:v.timeframe,mode:v.mode,verdict:v.verdict,side:v.side??null,reason:v.reason,candle_time:candle.toISOString(),evaluated_at:evaluated.toISOString(),entry_price:v.entryPrice??null,stop_loss:v.stopLoss??null,take_profit:v.takeProfit??null,risk_percent:v.riskPercent??null,reward_risk:v.rewardRisk??null,spread_points:v.spreadPoints??null,h1_fast:v.h1Fast??null,h1_slow:v.h1Slow??null,m15_ema:v.m15Ema??null,m15_atr:v.m15Atr??null,m5_ema:v.m5Ema??null,volume:v.volume??null,match_score:v.matchScore??null}
   const inserted=await db.from('mt5_bot_decisions').insert(row).select('id').single()
   if(inserted.error){console.error('Decision sync failed',{code:inserted.error.code??null,message:inserted.error.message});return res.status(500).json({ok:false,error:'Decision sync failed',code:inserted.error.code??'DATABASE_TRANSPORT_ERROR'})}
-  // Una señal en sombra con niveles y volumen completos queda a la espera de tu aprobación explícita.
-  // No es una orden: es una propuesta que expira sola si no la revisas a tiempo.
-  if(v.verdict==='signal'&&v.mode==='shadow'&&v.side&&finiteOrNull(v.entryPrice)&&v.entryPrice!==null&&finiteOrNull(v.stopLoss)&&v.stopLoss!==null&&finiteOrNull(v.takeProfit)&&v.takeProfit!==null&&finiteOrNull(v.volume)&&v.volume!==null){
+  // Una señal con niveles y volumen completos queda a la espera de tu aprobación explícita —
+  // en sombra es 100% informativa; en demo es la propuesta que el EA ejecutará SOLO si la apruebas
+  // (ver next-approved-order.ts). No es una orden: es una propuesta que expira sola si no decides a tiempo.
+  if(v.verdict==='signal'&&(v.mode==='shadow'||v.mode==='demo')&&v.side&&finiteOrNull(v.entryPrice)&&v.entryPrice!==null&&finiteOrNull(v.stopLoss)&&v.stopLoss!==null&&finiteOrNull(v.takeProfit)&&v.takeProfit!==null&&finiteOrNull(v.volume)&&v.volume!==null){
     const settings=await db.from('mt5_bot_settings').select('approval_mode').eq('id',true).maybeSingle()
     const approvalMode=settings.data?.approval_mode==='auto'?'auto':'manual' // ante cualquier duda (fila ausente, error de lectura) nunca asumimos 'auto'
     const now=new Date().toISOString()
@@ -44,6 +47,13 @@ export default async function handler(req:VercelRequest,res:VercelResponse){
     // El correo nunca bloquea ni hace fallar la respuesta: si EmailJS está mal configurado o caído,
     // la señal igual queda guardada y visible en el dashboard, solo sin el aviso por correo.
     else await notifyPendingOrder({symbol:v.symbol as string,side:v.side as 'buy'|'sell',entryPrice:v.entryPrice as number,stopLoss:v.stopLoss as number,takeProfit:v.takeProfit as number,volume:v.volume as number,expiresAt,autoApproved:approvalMode==='auto'})
+  }
+  // El EA, tras ejecutar de verdad una orden aprobada, reporta a cuál pending order corresponde
+  // (nunca lo adivinamos por coincidencia de hora/símbolo) y el ticket de posición real de MT5 para
+  // poder enlazarla más adelante con el deal de cierre y así saber la ganancia o pérdida real.
+  if(v.verdict==='order_sent'&&v.pendingOrderId){
+    const {error:filledError}=await db.from('mt5_bot_pending_orders').update({status:'filled',position_ticket:v.positionTicket??null}).eq('id',v.pendingOrderId).eq('status','approved')
+    if(filledError)console.error('Pending order fill update failed',{code:filledError.code??null,message:filledError.message})
   }
   return res.status(200).json({ok:true,receivedAt:new Date().toISOString()})
 }
